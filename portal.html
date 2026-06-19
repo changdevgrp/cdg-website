@@ -145,6 +145,12 @@ button{font-family:'Space Grotesk',sans-serif;cursor:pointer}
 
 /* session log */
 .log-empty{text-align:center;padding:30px;color:var(--txt3);font-size:12px}
+.loading-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:70px 20px;gap:16px}
+.spinner{width:34px;height:34px;border:2.5px solid var(--line2);border-top-color:var(--gold);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-t{font-size:12px;color:var(--txt3);font-family:'Space Mono',monospace;letter-spacing:0.05em}
+.sync-banner{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:300;background:var(--bg4);border:0.5px solid var(--gline);border-radius:8px;padding:9px 16px;font-size:12px;color:var(--gold);display:none;align-items:center;gap:8px;box-shadow:0 8px 30px rgba(0,0,0,0.5)}
+.sync-banner.show{display:flex}
 .log-item{display:flex;align-items:center;gap:14px;padding:13px 16px;border:0.5px solid var(--line2);border-radius:9px;background:var(--bg3);margin-bottom:8px}
 .log-item.has-note:hover{border-color:var(--gline);background:var(--bg4)}
 .sd-row{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:0.5px solid var(--line2);padding-bottom:8px}
@@ -330,6 +336,7 @@ button{font-family:'Space Grotesk',sans-serif;cursor:pointer}
 </div>
 
 <div class="toast" id="toast"><i class="ti ti-circle-check"></i><span id="toastMsg"></span></div>
+<div class="sync-banner" id="syncBanner"><i class="ti ti-cloud-up"></i><span class="sb-txt">Saving offline\u2026</span></div>
 
 <div class="modal-bg" id="modalBg">
   <div class="modal">
@@ -353,30 +360,45 @@ const SUPABASE_ANON_KEY = CFG.SUPABASE_ANON_KEY || '';
 const USE_SB = !!(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase);
 const sb = USE_SB ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+// Columns the browser is allowed to read (PIN is intentionally excluded).
+const EMP_COLS='id,name,dept,rate,active,pay_type,phone,email,address,hire_date,emergency,notes';
 /* ---- Data access layer: Supabase when configured, else demo memory ---- */
 const DB = {
   async getEmployees(){
-    if(USE_SB){ const {data,error}=await sb.from('employees').select('*').eq('active',true).order('id');
+    if(USE_SB){ const {data,error}=await sb.from('employees').select(EMP_COLS).eq('active',true).order('id');
       if(error){console.error(error);return EMPLOYEES;} return data.map(mapEmp); }
     return EMPLOYEES;
   },
   async verifyPin(pin){
-    if(USE_SB){ const {data,error}=await sb.from('employees').select('*').eq('pin',pin).eq('active',true).maybeSingle();
-      if(error){console.error(error);return null;} return data?mapEmp(data):null; }
+    if(USE_SB){
+      // Verified server-side by the verify-pin Edge Function — the PIN is never
+      // checked against a table the browser can read.
+      try{
+        const res=await fetch(SUPABASE_URL+'/functions/v1/verify-pin',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY},
+          body:JSON.stringify({pin})
+        });
+        const j=await res.json();
+        if(j&&j.ok&&j.employee) return mapEmp(j.employee);
+        return null;
+      }catch(e){ console.error('verify-pin failed',e); return null; }
+    }
     return EMPLOYEES.find(e=>e.pin===pin)||null;
   },
   async addEmployee(emp){
     const row={name:emp.name,dept:emp.dept,pin:emp.pin,rate:emp.rate||0,pay_type:emp.payType||'hourly',
       phone:emp.phone||null,email:emp.email||null,address:emp.address||null,
       hire_date:emp.hireDate||null,emergency:emp.emergency||null,notes:emp.notes||null};
-    if(USE_SB){ const {data,error}=await sb.from('employees').insert(row).select().single();
+    if(USE_SB){ const {data,error}=await sb.from('employees').insert(row).select(EMP_COLS).single();
       if(error){console.error(error);throw error;} return mapEmp(data); }
     const e={...emp,id:Math.max(0,...EMPLOYEES.map(x=>x.id))+1}; EMPLOYEES.push(e); return e;
   },
   async updateEmployee(id, emp){
-    const row={name:emp.name,dept:emp.dept,pin:emp.pin,rate:emp.rate||0,pay_type:emp.payType||'hourly',
+    const row={name:emp.name,dept:emp.dept,rate:emp.rate||0,pay_type:emp.payType||'hourly',
       phone:emp.phone||null,email:emp.email||null,address:emp.address||null,
       hire_date:emp.hireDate||null,emergency:emp.emergency||null,notes:emp.notes||null};
+    if(emp.pin){ row.pin=emp.pin; }   // only change PIN if a new one was entered
     if(USE_SB){ const {error}=await sb.from('employees').update(row).eq('id',id); if(error){console.error(error);throw error;} return; }
     const i=EMPLOYEES.findIndex(e=>e.id===id); if(i>=0) EMPLOYEES[i]={...EMPLOYEES[i],...emp,id};
   },
@@ -432,12 +454,17 @@ const DB = {
       const fields={end_ts:s.end?new Date(s.end).toISOString():null,dur_ms:s.durMs||null,
         pay:s.pay||null,pay_amt:s.pay||null,status:s.status||'done',
         client_price:s.clientPrice||null,notes:s.notes||null};
-      if(s.dbId){ // finalize the active row created at clock-in
-        const {error}=await sb.from('sessions').update(fields).eq('id',s.dbId); if(error)console.error(error); return; }
-      // fallback: insert a complete row (e.g. clock-in DB write had failed)
-      const row={emp_id:s.empId,dept:s.dept,kind:s.kind,label:s.label,sub:s.sub,client:s.client||null,
-        start_ts:new Date(s.start).toISOString(),gps_lat:s.gps?s.gps.lat:null,gps_lng:s.gps?s.gps.lng:null,...fields};
-      const {error}=await sb.from('sessions').insert(row); if(error)console.error(error); return;
+      try{
+        if(s.dbId){ const {error}=await sb.from('sessions').update(fields).eq('id',s.dbId); if(error) throw error; return; }
+        const row={emp_id:s.empId,dept:s.dept,kind:s.kind,label:s.label,sub:s.sub,client:s.client||null,
+          start_ts:new Date(s.start).toISOString(),gps_lat:s.gps?s.gps.lat:null,gps_lng:s.gps?s.gps.lng:null,...fields};
+        const {error}=await sb.from('sessions').insert(row); if(error) throw error; return;
+      }catch(e){
+        console.error('save failed, queued offline', e);
+        if(s.dbId) queuePunch({t:'save',id:s.dbId,fields});
+        else queuePunch({t:'insert',row:{emp_id:s.empId,dept:s.dept,kind:s.kind,label:s.label,sub:s.sub,client:s.client||null,start_ts:new Date(s.start).toISOString(),gps_lat:s.gps?s.gps.lat:null,gps_lng:s.gps?s.gps.lng:null,...fields}});
+        return;
+      }
     }
     SESSIONS.unshift({...s});
   },
@@ -461,7 +488,7 @@ const DB = {
     const i=SESSIONS.findIndex(x=>x.id===id); if(i>=0) SESSIONS.splice(i,1);
   }
 };
-function mapEmp(r){ return {id:r.id,name:r.name,dept:r.dept,pin:r.pin,rate:Number(r.rate)||0,
+function mapEmp(r){ return {id:r.id,name:r.name,dept:r.dept,pin:r.pin||'',rate:Number(r.rate)||0,
   payType:r.pay_type||'hourly',phone:r.phone||'',email:r.email||'',address:r.address||'',
   hireDate:r.hire_date||'',emergency:r.emergency||'',notes:r.notes||''}; }
 function mapProp(r){ return {id:r.id,name:r.name,addr:r.addr||'',clientPrice:Number(r.client_price)||0,payRate:Number(r.pay_rate)||Number(r.rate)||0}; }
@@ -539,6 +566,44 @@ function loadState(){
   return false;
 }
 
+/* ---- Real-time sync: owner's admin view updates live as staff clock in/out ---- */
+let rtChannel=null;
+function subscribeRealtime(){
+  if(!USE_SB || rtChannel || !window.supabase) return;
+  try{
+    rtChannel = sb.channel('cdg-sessions')
+      .on('postgres_changes',{event:'*',schema:'public',table:'sessions'}, async ()=>{
+        if(currentUser && currentUser.isAdmin){
+          SESSIONS = await DB.getSessions(null);
+          renderAdmin();
+        }
+      }).subscribe();
+  }catch(e){ console.error(e); }
+}
+function unsubscribeRealtime(){ try{ if(rtChannel){ sb.removeChannel(rtChannel); rtChannel=null; } }catch(e){} }
+
+/* ---- Offline-safe punches: if a save fails (bad signal), queue it and retry ---- */
+const OUTBOX_KEY='cdg_outbox_v1';
+function outboxGet(){ try{ return JSON.parse(localStorage.getItem(OUTBOX_KEY)||'[]'); }catch(e){ return []; } }
+function outboxSet(a){ try{ localStorage.setItem(OUTBOX_KEY, JSON.stringify(a)); }catch(e){} }
+function queuePunch(op){ const a=outboxGet(); a.push(op); outboxSet(a); showSyncBanner(); }
+function showSyncBanner(){ const b=$('#syncBanner'); if(b){ const n=outboxGet().length; if(n){ b.querySelector('.sb-txt').textContent='Saving offline \u00b7 '+n+' pending'; b.classList.add('show'); } else b.classList.remove('show'); } }
+async function flushOutbox(){
+  if(!USE_SB) return;
+  let a=outboxGet(); if(!a.length) return;
+  const remaining=[];
+  for(const op of a){
+    try{
+      if(op.t==='save'){ const {error}=await sb.from('sessions').update(op.fields).eq('id',op.id); if(error) throw error; }
+      else if(op.t==='insert'){ const {error}=await sb.from('sessions').insert(op.row); if(error) throw error; }
+    }catch(e){ remaining.push(op); }
+  }
+  outboxSet(remaining); showSyncBanner();
+  if(remaining.length===0 && currentUser){ await refreshSessions(); if(currentUser.isAdmin) renderAdmin(); }
+}
+window.addEventListener('online', flushOutbox);
+setInterval(flushOutbox, 20000);
+
 // ---- Helpers ----
 const $ = s => document.querySelector(s);
 const el = (t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
@@ -588,7 +653,9 @@ function pressKey(k){
   if(pinBuf.length===4) setTimeout(submitPin,180);
 }
 async function submitPin(){
-  if(pinBuf===ADMIN_PIN){
+  if(!USE_SB && pinBuf===ADMIN_PIN){
+    // Demo-only master PIN. In live mode, admins log in with their real PIN
+    // (verified server-side), so there is no hardcoded backdoor in production.
     currentUser={ id:0, name:'Pablo Chang', dept:'admin', pin:ADMIN_PIN, rate:0, isAdmin:true };
     activeSession=activeByEmp[0]||null; saveState(); await enterApp(); return;
   }
@@ -612,18 +679,19 @@ async function enterApp(){
   $('#tbCtx1').textContent=d.label;
   $('#tbCtx2').textContent='CDG // '+(currentUser.isAdmin?'ADMIN PANEL':currentUser.dept.toUpperCase());
   startClock();
-  // Load live data for this user, then render.
+  // Load live data in parallel (faster login) with a brief loading state.
   if(USE_SB){
-    if(currentUser.dept==='airbnb'){ PROPERTIES = await DB.getProperties(); }
-    await refreshSessions();
-    // The DB is the source of truth for an in-progress clock-in, so a session
-    // started on one device resumes on any other device.
+    const m=$('#mainContent'); if(m) m.innerHTML='<div class="loading-wrap"><div class="spinner"></div><div class="loading-t">Loading your dashboard\u2026</div></div>';
     try{
-      const dbActive = await DB.getActiveSession(currentUser.id);
+      const tasks=[ refreshSessions(), DB.getActiveSession(currentUser.id) ];
+      if(currentUser.dept==='airbnb') tasks.push(DB.getProperties().then(p=>{ PROPERTIES=p; }));
+      const results=await Promise.all(tasks);
+      const dbActive=results[1];
       activeSession = dbActive || null;
       if(dbActive) activeByEmp[currentUser.id]=dbActive; else delete activeByEmp[currentUser.id];
       saveState();
     }catch(e){ console.error(e); }
+    if(currentUser.isAdmin) subscribeRealtime();
   }
   routeView();
 }
@@ -631,6 +699,7 @@ function logout(){
   // Active sessions are preserved per-employee and resume on next login,
   // so logging out never loses in-progress work (and never blocks on a dialog).
   clearInterval(tickHandle);
+  unsubscribeRealtime();
   if(currentUser){
     if(activeSession){ activeByEmp[currentUser.id]=activeSession; toast('Logged out \u2014 your clock is still running, log back in to resume'); }
     else delete activeByEmp[currentUser.id];
@@ -1050,7 +1119,7 @@ async function renderAdminTeam(){
     const tr=el('tr',null,`
       <td style="font-weight:500;cursor:pointer" class="empname">${e.name}${e.phone?'<div style="font-size:10px;color:var(--txt3);font-family:Space Mono,monospace;margin-top:2px">'+e.phone+'</div>':''}</td>
       <td><span class="dept-tag ${d.tag}">${d.label}</span></td>
-      <td class="pin-cell">${e.pin}</td>
+      <td class="pin-cell">${e.pin?e.pin:'\u2022\u2022\u2022\u2022'}</td>
       <td class="mono">${payLabel}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn btn-sm" data-edit="${e.id}" style="margin-right:6px"><i class="ti ti-edit"></i></button>
@@ -1077,7 +1146,7 @@ function openEmpForm(emp){
     <div class="field-row">
       <div class="field"><span class="field-l">Department</span><select class="field-s" id="efDept">
         ${opt('airbnb','Cleaning Rangers \u2014 Airbnb')}${opt('hotel','Cleaning Rangers \u2014 Hotel')}${opt('handy','Handy-Force / Rivus Force')}${opt('rivus','Rivus Force')}${opt('admin','Administrator')}</select></div>
-      <div class="field"><span class="field-l">4-digit PIN <span style="color:var(--accent2)">*</span></span><input class="field-i mono" id="efPin" maxlength="4" value="${emp.pin||''}" placeholder="0000"/></div>
+      <div class="field"><span class="field-l">4-digit PIN ${isEdit?'':'<span style="color:var(--accent2)">*</span>'}</span><input class="field-i mono" id="efPin" maxlength="4" value="" placeholder="${isEdit?'leave blank to keep':'0000'}"/></div>
     </div>
     <div class="field-row">
       <div class="field"><span class="field-l">Pay type</span><select class="field-s" id="efPayType">${popt('hourly','Hourly')}${popt('flat','Flat / per-job')}${popt('salary','Salary')}</select></div>
@@ -1104,9 +1173,13 @@ function openEmpForm(emp){
       phone:$('#efPhone').value.trim(), email:$('#efEmail').value.trim(), address:$('#efAddress').value.trim(),
       hireDate:$('#efHire').value||null, emergency:$('#efEmerg').value.trim(), notes:$('#efNotes').value.trim()
     };
-    if(!data.name||data.pin.length!==4){ toast('Name + 4-digit PIN required','err'); return; }
-    const clash=EMPLOYEES.some(e=>e.pin===data.pin && e.id!==emp.id)|| data.pin===ADMIN_PIN;
-    if(clash){ toast('PIN already in use','err'); return; }
+    if(!data.name){ toast('Name is required','err'); return; }
+    if(!isEdit && data.pin.length!==4){ toast('A 4-digit PIN is required for new staff','err'); return; }
+    if(data.pin && data.pin.length!==4){ toast('PIN must be 4 digits','err'); return; }
+    if(data.pin){
+      const clash=EMPLOYEES.some(e=>e.pin && e.pin===data.pin && e.id!==emp.id) || data.pin===ADMIN_PIN;
+      if(clash){ toast('PIN already in use','err'); return; }
+    }
     try{
       if(isEdit) await DB.updateEmployee(emp.id, data);
       else await DB.addEmployee(data);
@@ -1410,6 +1483,8 @@ $('#btnLogout').onclick=logout;
 window.addEventListener('beforeunload', saveState);
 renderDemoPins();
 updatePinDisplay();
+showSyncBanner();
+flushOutbox();
 
 // Restore a logged-in session after a refresh so nothing is lost.
 (async function bootRestore(){
