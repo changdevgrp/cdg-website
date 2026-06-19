@@ -14,7 +14,7 @@ insert into employees (name, dept, pin, rate, active) values
   ('Victor Angulo', 'hotel', '3002', 0, true),
   ('Zulaima Leon', 'hotel', '3003', 0, true),
   ('Evenyira Delgado', 'airbnb', '4001', 0, true),
-  ('Charles McCrary', 'airbnb', '4002', 0, true),
+  ('Charles McCrary', 'admin', '4002', 0, true),
   ('Emma Neiford', 'airbnb', '4003', 0, true),
   ('Alex Ramos', 'airbnb', '4004', 0, true),
   ('Damaris Rodriguez', 'airbnb', '4005', 0, true),

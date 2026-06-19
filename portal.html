@@ -18,7 +18,7 @@
   --accent:#5B7BFF;--accent2:#8BA4FF;--accent3:#3D5CE8;
   --adim:rgba(91,123,255,0.1);--aline:rgba(91,123,255,0.22);
   --gold:#C9A96E;--gdim:rgba(201,169,110,0.1);--gline:rgba(201,169,110,0.25);
-  --green:#2ECC8A;--gdim2:rgba(46,204,138,0.12);--gline2:rgba(46,204,138,0.3);
+  --green:#2ECC8A;--gdim2:rgba(46,204,138,0.12);--gline2:rgba(46,204,138,0.3);--rose:#FF8E72;
   --teal:#5DCAA5;--purple:#9B8FFF;--red:#FF6B6B;--rdim:rgba(255,107,107,0.1);
   --amber:#F0B95C;--adim2:rgba(240,185,92,0.1);
   --line:rgba(255,255,255,0.04);--line2:rgba(255,255,255,0.08);--line3:rgba(255,255,255,0.14);
@@ -140,6 +140,7 @@ button{font-family:'Space Grotesk',sans-serif;cursor:pointer}
 .field-i:focus,.field-s:focus,.field-t:focus{outline:none;border-color:var(--aline)}
 .field-t{resize:vertical;min-height:64px}
 .field-s{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A86A8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 13px center}
+.field-s option{background:#10141F;color:#DDE3F5}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* session log */
@@ -157,7 +158,9 @@ button{font-family:'Space Grotesk',sans-serif;cursor:pointer}
 .lb-done{background:var(--adim);color:var(--accent2)}
 
 /* property list */
-.prop-grid{display:grid;gap:8px}
+.prop-grid{display:grid;gap:8px;max-height:330px;overflow-y:auto;padding-right:4px}
+.prop-search{width:100%;padding:12px 14px 12px 38px;background:var(--bg3);border:0.5px solid var(--line2);border-radius:8px;color:var(--txt);font-size:13px;font-family:'Space Grotesk',sans-serif;margin-bottom:12px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%237A86A8' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.3-4.3'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:13px center}
+.prop-search:focus{outline:none;border-color:var(--gline)}
 .prop-card{display:flex;align-items:center;gap:13px;padding:13px 15px;border:0.5px solid var(--line2);border-radius:9px;background:var(--bg3);cursor:pointer;transition:all 0.16s}
 .prop-card:hover{border-color:var(--aline);background:var(--bg4)}
 .prop-card.sel{border-color:var(--gline);background:var(--gdim)}
@@ -380,8 +383,13 @@ const DB = {
   },
   async getProperties(){
     if(USE_SB){ const {data,error}=await sb.from('properties').select('*').eq('active',true).order('id');
-      if(error){console.error(error);return PROPERTIES;} return data; }
-    return PROPERTIES;
+      if(error){console.error(error);return DEMO_PROPERTIES.map(mapProp);} return data.map(mapProp); }
+    return DEMO_PROPERTIES.map(mapProp);
+  },
+  async updateProperty(id, fields){
+    if(USE_SB){ const {error}=await sb.from('properties').update({client_price:fields.clientPrice||0,pay_rate:fields.payRate||0}).eq('id',id);
+      if(error){console.error(error);throw error;} return; }
+    const p=DEMO_PROPERTIES.find(x=>x.id===id); if(p){ p.client_price=fields.clientPrice||0; p.pay_rate=fields.payRate||0; }
   },
   async getSessions(empId){
     if(USE_SB){ let q=sb.from('sessions').select('*').order('start_ts',{ascending:false});
@@ -393,6 +401,7 @@ const DB = {
     if(USE_SB){ const row={emp_id:s.empId,dept:s.dept,kind:s.kind,label:s.label,sub:s.sub,client:s.client||null,
         start_ts:new Date(s.start).toISOString(),end_ts:s.end?new Date(s.end).toISOString():null,
         dur_ms:s.durMs||null,pay:s.pay||null,status:s.status||'done',
+        client_price:s.clientPrice||null,pay_amt:s.pay||null,
         gps_lat:s.gps?s.gps.lat:null,gps_lng:s.gps?s.gps.lng:null,notes:s.notes||null};
       const {error}=await sb.from('sessions').insert(row); if(error)console.error(error); return; }
     SESSIONS.unshift({...s});
@@ -401,9 +410,11 @@ const DB = {
 function mapEmp(r){ return {id:r.id,name:r.name,dept:r.dept,pin:r.pin,rate:Number(r.rate)||0,
   payType:r.pay_type||'hourly',phone:r.phone||'',email:r.email||'',address:r.address||'',
   hireDate:r.hire_date||'',emergency:r.emergency||'',notes:r.notes||''}; }
+function mapProp(r){ return {id:r.id,name:r.name,addr:r.addr||'',clientPrice:Number(r.client_price)||0,payRate:Number(r.pay_rate)||Number(r.rate)||0}; }
 function mapSess(r){ return {id:r.id,empId:r.emp_id,dept:r.dept,kind:r.kind,label:r.label,sub:r.sub,client:r.client,
   start:r.start_ts?new Date(r.start_ts).getTime():null,end:r.end_ts?new Date(r.end_ts).getTime():null,
   durMs:r.dur_ms?Number(r.dur_ms):null,pay:r.pay?Number(r.pay):null,status:r.status,
+  clientPrice:r.client_price?Number(r.client_price):0,
   gps:(r.gps_lat!=null)?{lat:r.gps_lat,lng:r.gps_lng}:null,notes:r.notes}; }
 
 // ---- Brand / dept config ----
@@ -426,14 +437,15 @@ let EMPLOYEES = [
 const ADMIN_PIN = '0000';
 
 // ---- Demo properties (Airbnb) — replaced by DB.getProperties() when live ----
-let PROPERTIES = [
-  { id:1, name:'Beachside Villa',          addr:'14 Ocean Dr',      rate:120 },
-  { id:2, name:'Downtown Loft',            addr:'88 Bay St #4',     rate:85 },
-  { id:3, name:'Riverside Retreat',        addr:'22 River Rd',      rate:110 },
-  { id:4, name:'Ponte Vedra Estate',       addr:'5 Palm Blvd',      rate:160 },
-  { id:5, name:'Atlantic Beach Cottage',   addr:'9 Shore Ln',       rate:95 },
-  { id:6, name:'Southside Suite',          addr:'301 Phillips Hwy', rate:90 },
+const DEMO_PROPERTIES = [
+  { id:1, name:'Beachside Villa',          addr:'14 Ocean Dr',      client_price:160, pay_rate:120 },
+  { id:2, name:'Downtown Loft',            addr:'88 Bay St #4',     client_price:120, pay_rate:85 },
+  { id:3, name:'Riverside Retreat',        addr:'22 River Rd',      client_price:150, pay_rate:110 },
+  { id:4, name:'Ponte Vedra Estate',       addr:'5 Palm Blvd',      client_price:220, pay_rate:160 },
+  { id:5, name:'Atlantic Beach Cottage',   addr:'9 Shore Ln',       client_price:130, pay_rate:95 },
+  { id:6, name:'Southside Suite',          addr:'301 Phillips Hwy', client_price:125, pay_rate:90 },
 ];
+let PROPERTIES = [];
 
 const JOB_TYPES = ['Pool cleaning','Spa maintenance','Chemical balance','Equipment repair','Filter service','Inspection','General maintenance','Other'];
 const HF_JOBS  = ['Repair','Installation','Maintenance','Custom build','Inspection','Emergency call','Punch list','Other'];
@@ -710,6 +722,10 @@ function renderAirbnb(){
       <div class="panel-h"><div class="panel-ht"><i class="ti ti-home-check"></i>Active Turnover</div><div class="panel-hs">${fmtMoney(activeSession.rate||0)} flat</div></div>
       <div class="panel-b">
         <div class="field"><span class="field-l">Property</span><div style="font-size:15px;font-weight:600">${activeSession.label}</div><div style="font-size:11px;color:var(--txt3);font-family:'Space Mono',monospace;margin-top:2px">${activeSession.sub||''}</div></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border:0.5px solid var(--gline);border-radius:9px;background:var(--gdim);margin:4px 0 14px">
+          <span style="font-size:12px;color:var(--txt2);letter-spacing:0.04em">YOUR PAY FOR THIS TURNOVER</span>
+          <span style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--gold)">${fmtMoney(activeSession.rate||0)}</span>
+        </div>
         <div class="field"><span class="field-l">Notes (damage, supplies, issues)</span><textarea class="field-t" id="cleanNotes" placeholder="Anything the owner should know?">${activeSession.notes||''}</textarea></div>
         <button class="clockbtn out" id="btnDone"><i class="ti ti-circle-check"></i>MARK TURNOVER COMPLETE</button>
       </div>
@@ -717,9 +733,11 @@ function renderAirbnb(){
   }else{
     m.innerHTML+=`
     <div class="panel">
-      <div class="panel-h"><div class="panel-ht"><i class="ti ti-list-check"></i>Select Property</div><div class="panel-hs">${PROPERTIES.length} assigned</div></div>
-      <div class="panel-b"><div class="prop-grid" id="propGrid"></div>
-      <button class="clockbtn in" id="btnStartClean" style="margin-top:16px"><i class="ti ti-player-play"></i>START TURNOVER</button>
+      <div class="panel-h"><div class="panel-ht"><i class="ti ti-list-check"></i>Select Property</div><div class="panel-hs" id="propCount">${PROPERTIES.length} assigned</div></div>
+      <div class="panel-b">
+        <input class="prop-search" id="propSearch" placeholder="Search by client name or address..." autocomplete="off"/>
+        <div class="prop-grid" id="propGrid"></div>
+        <button class="clockbtn in" id="btnStartClean" style="margin-top:16px"><i class="ti ti-player-play"></i>START TURNOVER</button>
       </div>
     </div>`;
   }
@@ -742,20 +760,34 @@ function renderAirbnb(){
       activeSession=null; selectedProp=null; renderAirbnb();
     };
   }else{
-    const grid=$('#propGrid');
-    PROPERTIES.forEach(p=>{
-      const c=el('div','prop-card'+(selectedProp===p.id?' sel':''),`
-        <div class="prop-check"><i class="ti ti-check"></i></div>
-        <div class="prop-info"><div class="prop-n">${p.name}</div><div class="prop-a">${p.addr}</div></div>
-        <div class="prop-rate">${fmtMoney(p.rate)}</div>`);
-      c.onclick=()=>{ selectedProp=p.id; renderAirbnb(); };
-      grid.appendChild(c);
-    });
+    const grid=$('#propGrid'), search=$('#propSearch');
+    function paintProps(){
+      const q=(search.value||'').trim().toLowerCase();
+      const matches = PROPERTIES.filter(p=> !q || (p.name+' '+(p.addr||'')).toLowerCase().includes(q));
+      $('#propCount').textContent = q ? (matches.length+' match'+(matches.length===1?'':'es')) : (PROPERTIES.length+' assigned');
+      grid.innerHTML='';
+      if(matches.length===0){ grid.innerHTML=`<div style="padding:22px;text-align:center;color:var(--txt3);font-size:13px">No properties match \u201c${search.value.trim()}\u201d</div>`; return; }
+      matches.forEach(p=>{
+        const c=el('div','prop-card'+(selectedProp===p.id?' sel':''),`
+          <div class="prop-check"><i class="ti ti-check"></i></div>
+          <div class="prop-info"><div class="prop-n">${p.name}</div><div class="prop-a">${p.addr||''}</div></div>
+          <i class="ti ti-chevron-right" style="color:var(--txt3);font-size:16px"></i>`);
+        c.onclick=()=>{
+          selectedProp=p.id;
+          grid.querySelectorAll('.prop-card').forEach(x=>x.classList.remove('sel'));
+          c.classList.add('sel');
+          c.scrollIntoView({block:'nearest'});
+        };
+        grid.appendChild(c);
+      });
+    }
+    search.oninput=paintProps;
+    paintProps();
     $('#btnStartClean').onclick=()=>{
       if(!selectedProp){ toast('Select a property first','err'); return; }
       const p=PROPERTIES.find(x=>x.id===selectedProp);
       activeSession={ id:SID++, empId:currentUser.id, dept:'airbnb', kind:'clean',
-        label:p.name, sub:p.addr, rate:p.rate, start:Date.now(), notes:'', status:'active' };
+        label:p.name, sub:p.addr, rate:p.payRate, clientPrice:p.clientPrice, start:Date.now(), notes:'', status:'active' };
       toast('Started \u00b7 '+p.name); renderAirbnb();
     };
   }
@@ -876,12 +908,16 @@ async function renderAdmin(){
   m.innerHTML=greetBlock()+`
     <div class="tabs">
       <div class="tab ${adminTab==='team'?'active':''}" data-tab="team">Team</div>
+      <div class="tab ${adminTab==='pricing'?'active':''}" data-tab="pricing">Pricing</div>
+      <div class="tab ${adminTab==='profit'?'active':''}" data-tab="profit">Profit</div>
       <div class="tab ${adminTab==='logs'?'active':''}" data-tab="logs">All Logs</div>
       <div class="tab ${adminTab==='payroll'?'active':''}" data-tab="payroll">Payroll</div>
     </div>
     <div id="adminPane"></div>`;
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{adminTab=t.dataset.tab;renderAdmin();});
   if(adminTab==='team') renderAdminTeam();
+  if(adminTab==='pricing') renderAdminPricing();
+  if(adminTab==='profit') renderAdminProfit();
   if(adminTab==='logs') renderAdminLogs();
   if(adminTab==='payroll') renderAdminPayroll();
 }
@@ -967,6 +1003,123 @@ function openEmpForm(emp){
     }catch(e){ toast('Could not save (PIN may exist)','err'); return; }
     closeModal(); renderAdminTeam(); renderDemoPins(); toast(isEdit?('Updated \u00b7 '+data.name):('Added \u00b7 '+data.name));
   };
+}
+
+// ---------- PRICING (owner-only) — set client price + cleaner pay per property ----------
+async function renderAdminPricing(){
+  const pane=$('#adminPane');
+  if(USE_SB){ PROPERTIES = await DB.getProperties(); }
+  else if(!PROPERTIES.length){ PROPERTIES = await DB.getProperties(); }
+  pane.innerHTML=`
+    <div class="panel">
+      <div class="panel-h"><div class="panel-ht"><i class="ti ti-cash"></i>Property Pricing</div><div class="panel-hs" id="prCount">${PROPERTIES.length} properties</div></div>
+      <div class="panel-b">
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:12px;line-height:1.6">Set what the <b style="color:var(--txt2)">client pays</b> and what the <b style="color:var(--gold)">cleaner earns</b> per turnover. Only owners see this tab. Cleaners only see their own pay, and only after they check in.</div>
+        <input class="prop-search" id="prSearch" placeholder="Search by client name or address..." autocomplete="off"/>
+        <div class="prop-grid" id="prGrid" style="max-height:420px"></div>
+      </div>
+    </div>`;
+  const grid=$('#prGrid'), search=$('#prSearch');
+  function paint(){
+    const q=(search.value||'').trim().toLowerCase();
+    const matches=PROPERTIES.filter(p=>!q||(p.name+' '+(p.addr||'')).toLowerCase().includes(q));
+    $('#prCount').textContent = q?(matches.length+' match'+(matches.length===1?'':'es')):(PROPERTIES.length+' properties');
+    grid.innerHTML='';
+    if(!matches.length){ grid.innerHTML=`<div style="padding:22px;text-align:center;color:var(--txt3);font-size:13px">No properties match \u201c${search.value.trim()}\u201d</div>`; return; }
+    matches.forEach(p=>{
+      const profit=(p.clientPrice||0)-(p.payRate||0);
+      const row=el('div','prop-card',`
+        <div class="prop-info" style="flex:1">
+          <div class="prop-n">${p.name}</div><div class="prop-a">${p.addr||''}</div>
+          <div style="display:flex;gap:14px;margin-top:6px;font-family:'Space Mono',monospace;font-size:11px">
+            <span style="color:var(--txt2)">Client ${fmtMoney(p.clientPrice||0)}</span>
+            <span style="color:var(--gold)">Pay ${fmtMoney(p.payRate||0)}</span>
+            <span style="color:${profit>=0?'var(--green)':'var(--rose)'}">Profit ${fmtMoney(profit)}</span>
+          </div>
+        </div>
+        <button class="btn btn-sm" data-edit="${p.id}"><i class="ti ti-edit"></i></button>`);
+      row.querySelector('[data-edit]').onclick=()=>openPriceEditor(p,paint);
+      grid.appendChild(row);
+    });
+  }
+  search.oninput=paint; paint();
+}
+function openPriceEditor(p, after){
+  $('#modalTitle').textContent=p.name;
+  $('#modalBody').innerHTML=`
+    <div style="font-size:11px;color:var(--txt3);font-family:'Space Mono',monospace;margin-bottom:14px">${p.addr||''}</div>
+    <div class="field-row">
+      <div class="field"><span class="field-l">Client price ($)</span><input class="field-i mono" id="peClient" value="${p.clientPrice||''}" placeholder="0"/></div>
+      <div class="field"><span class="field-l">Cleaner pay ($)</span><input class="field-i mono" id="pePay" value="${p.payRate||''}" placeholder="0"/></div>
+    </div>
+    <div id="peProfit" style="text-align:center;font-family:'Space Mono',monospace;font-size:12px;color:var(--txt2);margin-top:4px"></div>`;
+  $('#modalFoot').innerHTML=`<button class="btn btn-ghost" id="peCancel">Cancel</button><button class="btn btn-pri" id="peSave">Save</button>`;
+  $('#modalBg').classList.add('show');
+  const calc=()=>{ const c=+$('#peClient').value||0,pay=+$('#pePay').value||0; $('#peProfit').innerHTML=`Profit per turnover: <b style="color:${c-pay>=0?'var(--green)':'var(--rose)'}">${fmtMoney(c-pay)}</b>`; };
+  $('#peClient').oninput=calc; $('#pePay').oninput=calc; calc();
+  $('#peCancel').onclick=closeModal; $('#modalX').onclick=closeModal;
+  $('#peSave').onclick=async()=>{
+    const clientPrice=+$('#peClient').value||0, payRate=+$('#pePay').value||0;
+    try{ await DB.updateProperty(p.id,{clientPrice,payRate}); }
+    catch(e){ toast('Could not save','err'); return; }
+    p.clientPrice=clientPrice; p.payRate=payRate;
+    closeModal(); if(after) after(); toast('Pricing updated \u00b7 '+p.name);
+  };
+}
+
+// ---------- PROFIT (owner-only) — weekly + monthly, per department + total ----------
+async function renderAdminProfit(){
+  const pane=$('#adminPane');
+  if(USE_SB){ SESSIONS = await DB.getSessions(null); }
+  const now=new Date();
+  const weekStart=new Date(now); const dow=(weekStart.getDay()+6)%7; weekStart.setDate(weekStart.getDate()-dow); weekStart.setHours(0,0,0,0);
+  const monthStart=new Date(now.getFullYear(),now.getMonth(),1).getTime();
+  const ws=weekStart.getTime();
+  const deptName={airbnb:'Cleaning Rangers \u2014 Airbnb',hotel:'Cleaning Rangers \u2014 Hotel',handy:'Handy-Force / Rivus Force',rivus:'Rivus Force',admin:'Admin'};
+  function agg(sinceTs){
+    const out={};
+    SESSIONS.filter(s=>s.status==='done' && (s.end||s.start)>=sinceTs).forEach(s=>{
+      const d=s.dept||'other';
+      out[d]=out[d]||{rev:0,pay:0};
+      out[d].rev += Number(s.clientPrice)||0;
+      out[d].pay += Number(s.pay)||0;
+    });
+    return out;
+  }
+  function card(title, sinceTs){
+    const a=agg(sinceTs);
+    const depts=Object.keys(a).sort();
+    let tRev=0,tPay=0;
+    let rows=depts.map(d=>{
+      const {rev,pay}=a[d]; tRev+=rev; tPay+=pay; const pf=rev-pay;
+      return `<tr>
+        <td style="padding:9px 0;font-size:12px">${deptName[d]||d}</td>
+        <td class="mono" style="text-align:right;color:var(--txt2)">${fmtMoney(rev)}</td>
+        <td class="mono" style="text-align:right;color:var(--gold)">${fmtMoney(pay)}</td>
+        <td class="mono" style="text-align:right;color:${pf>=0?'var(--green)':'var(--rose)'};font-weight:700">${fmtMoney(pf)}</td></tr>`;
+    }).join('');
+    if(!depts.length) rows=`<tr><td colspan="4" style="padding:18px 0;text-align:center;color:var(--txt3);font-size:12px">No completed jobs yet</td></tr>`;
+    const tPf=tRev-tPay;
+    return `<div class="panel" style="margin-bottom:16px">
+      <div class="panel-h"><div class="panel-ht"><i class="ti ti-chart-bar"></i>${title}</div></div>
+      <div class="panel-b" style="padding:0 18px 10px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="border-bottom:0.5px solid var(--line2)">
+            <th style="text-align:left;font-size:10px;color:var(--txt3);font-weight:500;padding:8px 0;letter-spacing:0.06em">DEPARTMENT</th>
+            <th style="text-align:right;font-size:10px;color:var(--txt3);font-weight:500;letter-spacing:0.06em">REVENUE</th>
+            <th style="text-align:right;font-size:10px;color:var(--txt3);font-weight:500;letter-spacing:0.06em">PAY</th>
+            <th style="text-align:right;font-size:10px;color:var(--txt3);font-weight:500;letter-spacing:0.06em">PROFIT</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr style="border-top:0.5px solid var(--line2)">
+            <td style="padding:11px 0;font-size:12px;font-weight:700">TOTAL</td>
+            <td class="mono" style="text-align:right;font-weight:700">${fmtMoney(tRev)}</td>
+            <td class="mono" style="text-align:right;font-weight:700;color:var(--gold)">${fmtMoney(tPay)}</td>
+            <td class="mono" style="text-align:right;font-weight:700;color:${tPf>=0?'var(--green)':'var(--rose)'}">${fmtMoney(tPf)}</td></tr></tfoot>
+        </table>
+      </div></div>`;
+  }
+  pane.innerHTML = card('This Week', ws) + card('This Month', monthStart) +
+    `<div style="font-size:10px;color:var(--txt3);line-height:1.7;padding:0 4px">Revenue = client price on completed turnovers. Pay = what employees earned. Profit = revenue \u2212 pay. Revenue currently tracks Airbnb client pricing; hourly departments show labor cost (revenue not yet captured for those). Want me to add client billing for hotel/field jobs too? Just ask.</div>`;
 }
 function renderAdminLogs(){
   const pane=$('#adminPane');
