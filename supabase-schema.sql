@@ -44,6 +44,17 @@ create table if not exists sessions (
   created_at  timestamptz not null default now()
 );
 
+-- ---------- CONTACT MESSAGES (homepage contact form) ----------
+create table if not exists contacts (
+  id          bigint generated always as identity primary key,
+  name        text,
+  email       text,
+  topic       text,
+  message     text,
+  status      text default 'new',
+  created_at  timestamptz not null default now()
+);
+
 -- ---------- NOMINATIONS (Be the C.H.A.N.G.E. form) ----------
 create table if not exists nominations (
   id            bigint generated always as identity primary key,
@@ -89,6 +100,7 @@ alter table employees   enable row level security;
 alter table properties  enable row level security;
 alter table sessions    enable row level security;
 alter table nominations enable row level security;
+alter table contacts    enable row level security;
 
 -- employees: read + write (admin panel manages these)
 create policy "anon read employees"  on employees  for select using (true);
@@ -110,3 +122,6 @@ create policy "anon update sessions" on sessions for update using (true);
 -- nominations: insert only from public (don't let public read others' nominations)
 create policy "anon insert nominations" on nominations for insert with check (true);
 -- (You read nominations from the Supabase dashboard, or add an authed admin policy later.)
+
+-- contacts: insert only from public (you read messages from the dashboard)
+create policy "anon insert contacts" on contacts for insert with check (true);
