@@ -183,6 +183,37 @@ button{font-family:inherit;cursor:pointer}
   .f-links{justify-content:center}
 }
 
+/* ===== PHONE (≤560px) ===== */
+@media(max-width:560px){
+  .hero{padding:104px 18px 44px}
+  .hero-h1{font-size:clamp(32px,8.5vw,40px);line-height:1.05;margin-bottom:14px}
+  .hero-sub{font-size:15px;line-height:1.7}
+  .spot-wrap{gap:28px;padding:44px 18px}
+  .portrait{max-width:none;aspect-ratio:4/5}
+  .portrait-img{object-position:center 18%}
+  .portrait-badge{bottom:12px;left:12px;right:12px;padding:11px 14px}
+  .pb-l{font-size:9px}
+  .pb-v{font-size:12px}
+  .pb-ico{font-size:20px}
+  .spot-name{font-size:clamp(28px,8vw,34px)}
+  .spot-title{font-size:13px;margin-bottom:18px}
+  .spot-bio{font-size:14.5px;line-height:1.85}
+  .spot-quote{font-size:18px;padding:16px 18px;margin-top:20px}
+  .spot-meta{gap:8px;margin-top:20px}
+  .sm{font-size:11px}
+  .story-wrap{padding:44px 18px}
+  .story-h{font-size:clamp(26px,7vw,32px)}
+  .story-body{font-size:14.5px}
+  .team-wrap{padding:44px 18px}
+  .team-h{font-size:clamp(26px,7vw,32px)}
+  .team-sub{font-size:14px}
+  .vstrip-wrap{padding:40px 18px}
+  .cta-wrap{padding:48px 18px}
+  .cta-h{font-size:clamp(26px,7vw,34px)}
+  .cta-btns{flex-direction:column;width:100%}
+  .cta-btns .btn{width:100%;justify-content:center}
+}
+
 /* ===== MOBILE NAV ===== */
 .nav-burger{display:none;width:40px;height:40px;border:0.5px solid var(--line3);border-radius:7px;background:transparent;cursor:pointer;align-items:center;justify-content:center;flex-direction:column;gap:4px;padding:0}
 .nav-burger span{display:block;width:18px;height:1.5px;background:var(--txt);transition:all 0.25s}
