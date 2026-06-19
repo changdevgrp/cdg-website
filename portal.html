@@ -391,6 +391,17 @@ const DB = {
       if(error){console.error(error);throw error;} return; }
     const p=DEMO_PROPERTIES.find(x=>x.id===id); if(p){ p.client_price=fields.clientPrice||0; p.pay_rate=fields.payRate||0; }
   },
+  async addProperty(p){
+    const row={name:p.name,addr:p.addr||null,client_price:p.clientPrice||0,pay_rate:p.payRate||0,active:true};
+    if(USE_SB){ const {data,error}=await sb.from('properties').insert(row).select().single();
+      if(error){console.error(error);throw error;} return mapProp(data); }
+    const np={id:Math.max(0,...DEMO_PROPERTIES.map(x=>x.id))+1,name:p.name,addr:p.addr||'',client_price:p.clientPrice||0,pay_rate:p.payRate||0};
+    DEMO_PROPERTIES.push(np); return mapProp(np);
+  },
+  async removeProperty(id){
+    if(USE_SB){ const {error}=await sb.from('properties').update({active:false}).eq('id',id); if(error)console.error(error); return; }
+    const i=DEMO_PROPERTIES.findIndex(x=>x.id===id); if(i>=0) DEMO_PROPERTIES.splice(i,1);
+  },
   async getSessions(empId){
     if(USE_SB){ let q=sb.from('sessions').select('*').order('start_ts',{ascending:false});
       if(empId!=null) q=q.eq('emp_id',empId);
@@ -1012,7 +1023,9 @@ async function renderAdminPricing(){
   else if(!PROPERTIES.length){ PROPERTIES = await DB.getProperties(); }
   pane.innerHTML=`
     <div class="panel">
-      <div class="panel-h"><div class="panel-ht"><i class="ti ti-cash"></i>Property Pricing</div><div class="panel-hs" id="prCount">${PROPERTIES.length} properties</div></div>
+      <div class="panel-h"><div class="panel-ht"><i class="ti ti-cash"></i>Property Pricing</div>
+        <div style="display:flex;align-items:center;gap:12px"><div class="panel-hs" id="prCount">${PROPERTIES.length} properties</div>
+        <button class="btn btn-pri btn-sm" id="btnAddProp"><i class="ti ti-plus"></i>Add Property</button></div></div>
       <div class="panel-b">
         <div style="font-size:11px;color:var(--txt3);margin-bottom:12px;line-height:1.6">Set what the <b style="color:var(--txt2)">client pays</b> and what the <b style="color:var(--gold)">cleaner earns</b> per turnover. Only owners see this tab. Cleaners only see their own pay, and only after they check in.</div>
         <input class="prop-search" id="prSearch" placeholder="Search by client name or address..." autocomplete="off"/>
@@ -1037,33 +1050,57 @@ async function renderAdminPricing(){
             <span style="color:${profit>=0?'var(--green)':'var(--rose)'}">Profit ${fmtMoney(profit)}</span>
           </div>
         </div>
-        <button class="btn btn-sm" data-edit="${p.id}"><i class="ti ti-edit"></i></button>`);
+        <button class="btn btn-sm" data-edit="${p.id}" style="margin-right:6px"><i class="ti ti-edit"></i></button>
+        <button class="btn btn-sm btn-danger" data-delprop="${p.id}"><i class="ti ti-trash"></i></button>`);
       row.querySelector('[data-edit]').onclick=()=>openPriceEditor(p,paint);
+      row.querySelector('[data-delprop]').onclick=async(e)=>{
+        e.stopPropagation();
+        if(confirm('Remove '+p.name+' from the property list?')){
+          await DB.removeProperty(p.id);
+          PROPERTIES=PROPERTIES.filter(x=>x.id!==p.id);
+          paint(); toast('Property removed');
+        }
+      };
       grid.appendChild(row);
     });
   }
   search.oninput=paint; paint();
+  $('#btnAddProp').onclick=()=>openPriceEditor(null, async()=>{ if(USE_SB){ PROPERTIES=await DB.getProperties(); } paint(); });
 }
 function openPriceEditor(p, after){
-  $('#modalTitle').textContent=p.name;
+  const isNew=!p;
+  p=p||{};
+  $('#modalTitle').textContent=isNew?'Add Property':p.name;
+  const nameBlock = isNew
+    ? `<div class="field"><span class="field-l">Client / property name <span style="color:var(--accent2)">*</span></span><input class="field-i" id="peName" value="" placeholder="e.g. Smith Family \u2014 Beachside"/></div>
+       <div class="field"><span class="field-l">Address</span><input class="field-i" id="peAddr" value="" placeholder="Street, City, FL ZIP"/></div>`
+    : `<div style="font-size:11px;color:var(--txt3);font-family:'Space Mono',monospace;margin-bottom:14px">${p.addr||''}</div>`;
   $('#modalBody').innerHTML=`
-    <div style="font-size:11px;color:var(--txt3);font-family:'Space Mono',monospace;margin-bottom:14px">${p.addr||''}</div>
+    ${nameBlock}
     <div class="field-row">
       <div class="field"><span class="field-l">Client price ($)</span><input class="field-i mono" id="peClient" value="${p.clientPrice||''}" placeholder="0"/></div>
       <div class="field"><span class="field-l">Cleaner pay ($)</span><input class="field-i mono" id="pePay" value="${p.payRate||''}" placeholder="0"/></div>
     </div>
     <div id="peProfit" style="text-align:center;font-family:'Space Mono',monospace;font-size:12px;color:var(--txt2);margin-top:4px"></div>`;
-  $('#modalFoot').innerHTML=`<button class="btn btn-ghost" id="peCancel">Cancel</button><button class="btn btn-pri" id="peSave">Save</button>`;
+  $('#modalFoot').innerHTML=`<button class="btn btn-ghost" id="peCancel">Cancel</button><button class="btn btn-pri" id="peSave">${isNew?'Add Property':'Save'}</button>`;
   $('#modalBg').classList.add('show');
   const calc=()=>{ const c=+$('#peClient').value||0,pay=+$('#pePay').value||0; $('#peProfit').innerHTML=`Profit per turnover: <b style="color:${c-pay>=0?'var(--green)':'var(--rose)'}">${fmtMoney(c-pay)}</b>`; };
   $('#peClient').oninput=calc; $('#pePay').oninput=calc; calc();
   $('#peCancel').onclick=closeModal; $('#modalX').onclick=closeModal;
   $('#peSave').onclick=async()=>{
     const clientPrice=+$('#peClient').value||0, payRate=+$('#pePay').value||0;
-    try{ await DB.updateProperty(p.id,{clientPrice,payRate}); }
-    catch(e){ toast('Could not save','err'); return; }
-    p.clientPrice=clientPrice; p.payRate=payRate;
-    closeModal(); if(after) after(); toast('Pricing updated \u00b7 '+p.name);
+    if(isNew){
+      const name=$('#peName').value.trim(), addr=$('#peAddr').value.trim();
+      if(!name){ toast('Property name required','err'); return; }
+      try{ await DB.addProperty({name,addr,clientPrice,payRate}); }
+      catch(e){ toast('Could not add property','err'); return; }
+      closeModal(); if(after) after(); toast('Property added \u00b7 '+name);
+    }else{
+      try{ await DB.updateProperty(p.id,{clientPrice,payRate}); }
+      catch(e){ toast('Could not save','err'); return; }
+      p.clientPrice=clientPrice; p.payRate=payRate;
+      closeModal(); if(after) after(); toast('Pricing updated \u00b7 '+p.name);
+    }
   };
 }
 
