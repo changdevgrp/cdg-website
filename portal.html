@@ -440,6 +440,25 @@ const DB = {
       const {error}=await sb.from('sessions').insert(row); if(error)console.error(error); return;
     }
     SESSIONS.unshift({...s});
+  },
+  // Edit a logged session (owner correction of times / pay / notes).
+  async updateSession(id, fields){
+    const row={start_ts:fields.start?new Date(fields.start).toISOString():undefined,
+      end_ts:fields.end?new Date(fields.end).toISOString():undefined,
+      dur_ms:fields.durMs!=null?fields.durMs:undefined,
+      pay:fields.pay!=null?fields.pay:undefined, pay_amt:fields.pay!=null?fields.pay:undefined,
+      client_price:fields.clientPrice!=null?fields.clientPrice:undefined,
+      notes:fields.notes!=null?fields.notes:undefined};
+    Object.keys(row).forEach(k=>row[k]===undefined&&delete row[k]);
+    if(USE_SB){ const {error}=await sb.from('sessions').update(row).eq('id',id); if(error){console.error(error);throw error;} return; }
+    const s=SESSIONS.find(x=>x.id===id);
+    if(s){ if(fields.start!=null)s.start=fields.start; if(fields.end!=null)s.end=fields.end;
+      if(fields.durMs!=null)s.durMs=fields.durMs; if(fields.pay!=null)s.pay=fields.pay;
+      if(fields.clientPrice!=null)s.clientPrice=fields.clientPrice; if(fields.notes!=null)s.notes=fields.notes; }
+  },
+  async deleteSession(id){
+    if(USE_SB){ const {error}=await sb.from('sessions').delete().eq('id',id); if(error){console.error(error);throw error;} return; }
+    const i=SESSIONS.findIndex(x=>x.id===id); if(i>=0) SESSIONS.splice(i,1);
   }
 };
 function mapEmp(r){ return {id:r.id,name:r.name,dept:r.dept,pin:r.pin,rate:Number(r.rate)||0,
@@ -1279,9 +1298,57 @@ function openSessionDetail(s, empName){
       <div style="font-size:10px;color:var(--txt3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px">Notes</div>
       <div style="background:var(--bg3);border:0.5px solid var(--line2);border-radius:8px;padding:13px;font-size:13px;line-height:1.6;color:${s.notes?'var(--txt)':'var(--txt3)'};white-space:pre-wrap;word-break:break-word">${s.notes?esc(s.notes):'No notes were left for this job.'}</div>
     </div>`;
-  $('#modalFoot').innerHTML=`<button class="btn btn-pri" id="sdClose">Close</button>`;
+  $('#modalFoot').innerHTML = isOwner
+    ? `<button class="btn btn-danger" id="sdDelete" style="margin-right:auto"><i class="ti ti-trash"></i></button><button class="btn btn-ghost" id="sdClose">Close</button><button class="btn btn-pri" id="sdEdit"><i class="ti ti-edit"></i>Edit / Correct</button>`
+    : `<button class="btn btn-pri" id="sdClose">Close</button>`;
   $('#modalBg').classList.add('show');
   $('#sdClose').onclick=closeModal; $('#modalX').onclick=closeModal;
+  if(isOwner){
+    $('#sdEdit').onclick=()=>openSessionEdit(s, empName);
+    $('#sdDelete').onclick=async()=>{
+      if(confirm('Delete this logged session permanently? This removes it from payroll and reports.')){
+        try{ await DB.deleteSession(s.id); }catch(e){ toast('Could not delete','err'); return; }
+        await refreshSessions(); closeModal(); renderAdmin(); toast('Session deleted');
+      }
+    };
+  }
+}
+function openSessionEdit(s, empName){
+  const dateStr=new Date(s.start).toISOString().slice(0,10);
+  const tIn=new Date(s.start).toTimeString().slice(0,5);
+  const tOut=s.end?new Date(s.end).toTimeString().slice(0,5):'';
+  const isAirbnb=s.dept==='airbnb';
+  $('#modalTitle').textContent='Correct \u00b7 '+s.label;
+  $('#modalBody').innerHTML=`
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:12px">${empName?esc(empName)+' \u00b7 ':''}${(DEPTS[s.dept]||{label:s.dept}).label}</div>
+    <div class="field"><span class="field-l">Date</span><input class="field-i" type="date" id="seDate" value="${dateStr}"/></div>
+    <div class="field-row">
+      <div class="field"><span class="field-l">Clock in</span><input class="field-i" type="time" id="seIn" value="${tIn}"/></div>
+      <div class="field"><span class="field-l">Clock out</span><input class="field-i" type="time" id="seOut" value="${tOut}"/></div>
+    </div>
+    <div id="seDur" style="font-size:11px;color:var(--txt2);font-family:'Space Mono',monospace;margin:-4px 0 12px"></div>
+    <div class="field-row">
+      <div class="field"><span class="field-l">${isAirbnb?'Cleaner pay ($)':'Pay ($)'}</span><input class="field-i mono" id="sePay" value="${(s.pay||0).toFixed(2)}"/></div>
+      ${isAirbnb?`<div class="field"><span class="field-l">Client price ($)</span><input class="field-i mono" id="seClient" value="${(s.clientPrice||0).toFixed(2)}"/></div>`:`<div class="field"><span class="field-l">&nbsp;</span><button class="btn btn-ghost" id="seRecalc" style="width:100%">Recalc from hours</button></div>`}
+    </div>
+    <div class="field"><span class="field-l">Notes</span><textarea class="field-t" id="seNotes" placeholder="Notes...">${s.notes?esc(s.notes):''}</textarea></div>`;
+  $('#modalFoot').innerHTML=`<button class="btn btn-ghost" id="seCancel">Cancel</button><button class="btn btn-pri" id="seSave">Save Correction</button>`;
+  const parseTs=(dv,tv)=>{ if(!dv||!tv) return null; return new Date(dv+'T'+tv).getTime(); };
+  const computeDur=()=>{ let st=parseTs($('#seDate').value,$('#seIn').value), en=parseTs($('#seDate').value,$('#seOut').value);
+    if(st!=null&&en!=null){ if(en<st) en+=864e5; /* overnight shift */ const dur=en-st; $('#seDur').textContent='Duration: '+fmtDur(dur); return {st,en,dur}; }
+    $('#seDur').textContent=''; return {st,en:null,dur:null}; };
+  ['seDate','seIn','seOut'].forEach(id=>$('#'+id).oninput=computeDur); computeDur();
+  const rc=$('#seRecalc'); if(rc) rc.onclick=()=>{ const {dur}=computeDur(); if(dur!=null){ const emp=EMPLOYEES.find(e=>e.id===s.empId); const rate=emp?emp.rate:0; $('#sePay').value=((dur/3600000)*rate).toFixed(2); toast('Pay recalculated from hours'); } };
+  $('#seCancel').onclick=()=>openSessionDetail(s, empName); $('#modalX').onclick=closeModal;
+  $('#seSave').onclick=async()=>{
+    const {st,en,dur}=computeDur();
+    if(st==null){ toast('Enter a valid date and clock-in time','err'); return; }
+    const fields={ start:st, end:en, durMs:dur, pay:+$('#sePay').value||0, notes:$('#seNotes').value.trim() };
+    if(isAirbnb && $('#seClient')) fields.clientPrice=+$('#seClient').value||0;
+    try{ await DB.updateSession(s.id, fields); }catch(e){ toast('Could not save correction','err'); return; }
+    Object.assign(s, fields);
+    await refreshSessions(); closeModal(); renderAdmin(); toast('Correction saved');
+  };
 }
 function renderAdminPayroll(){
   const pane=$('#adminPane');
