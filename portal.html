@@ -152,6 +152,18 @@ button{font-family:'Space Grotesk',sans-serif;cursor:pointer}
 .sync-banner{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:300;background:var(--bg4);border:0.5px solid var(--gline);border-radius:8px;padding:9px 16px;font-size:12px;color:var(--gold);display:none;align-items:center;gap:8px;box-shadow:0 8px 30px rgba(0,0,0,0.5)}
 .sync-banner.show{display:flex}
 .log-item{display:flex;align-items:center;gap:14px;padding:13px 16px;border:0.5px solid var(--line2);border-radius:9px;background:var(--bg3);margin-bottom:8px}
+.elog-group{border:0.5px solid var(--line2);border-radius:11px;background:var(--bg3);margin-bottom:10px;overflow:hidden}
+.elog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;cursor:pointer;transition:background 0.15s}
+.elog-head:hover{background:var(--bg4)}
+.elog-av{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.elog-name{font-size:14px;font-weight:600;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.elog-sub{font-size:11px;color:var(--txt3);font-family:'Space Mono',monospace;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.elog-h{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--teal)}
+.elog-p{font-family:'Space Mono',monospace;font-size:11px;color:var(--gold);margin-top:1px}
+.elog-chev{color:var(--txt3);font-size:18px;transition:transform 0.2s}
+.elog-group.open .elog-chev{transform:rotate(180deg)}
+.elog-body{display:none;padding:4px 12px 12px;border-top:0.5px solid var(--line2);background:var(--bg2)}
+.elog-group.open .elog-body{display:block}
 .log-item.has-note:hover{border-color:var(--gline);background:var(--bg4)}
 .sd-row{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:0.5px solid var(--line2);padding-bottom:8px}
 .sd-l{font-size:12px;color:var(--txt3)}.sd-v{font-size:13px;color:var(--txt);text-align:right}
@@ -486,6 +498,71 @@ const DB = {
   async deleteSession(id){
     if(USE_SB){ const {error}=await sb.from('sessions').delete().eq('id',id); if(error){console.error(error);throw error;} return; }
     const i=SESSIONS.findIndex(x=>x.id===id); if(i>=0) SESSIONS.splice(i,1);
+  },
+
+  // ---- Employee history: completed sessions over the last N days ----
+  async getSessionsSince(empId, days){
+    const sinceISO = new Date(Date.now() - days*86400000).toISOString();
+    if(USE_SB){
+      let q=sb.from('sessions').select('*').eq('status','done')
+        .gte('start_ts',sinceISO).order('start_ts',{ascending:false});
+      if(empId!=null) q=q.eq('emp_id',empId);
+      const {data,error}=await q; if(error){console.error(error);return [];} return data.map(mapSess);
+    }
+    const cut=Date.now()-days*86400000;
+    return SESSIONS.filter(s=>(empId==null||s.empId===empId)&&s.start>=cut);
+  },
+
+  // ---- ROOM / TASK LOGS (housekeeping sub-tasks, independent of the clock) ----
+  async getRoomLogs(empId, days){
+    if(USE_SB){
+      let q=sb.from('room_logs').select('*').order('start_ts',{ascending:false});
+      if(empId!=null) q=q.eq('emp_id',empId);
+      if(days!=null) q=q.gte('start_ts', new Date(Date.now()-days*86400000).toISOString());
+      const {data,error}=await q; if(error){console.error(error);return [];} return data.map(mapRoom);
+    }
+    let arr=ROOMLOGS.slice();
+    if(empId!=null) arr=arr.filter(r=>r.empId===empId);
+    if(days!=null){ const cut=Date.now()-days*86400000; arr=arr.filter(r=>r.start>=cut); }
+    return arr.sort((a,b)=>b.start-a.start);
+  },
+  async startRoomLog(obj){
+    if(USE_SB){
+      const row={emp_id:obj.empId,session_id:obj.sessionId||null,dept:obj.dept||null,
+        room:obj.room||null,notes:obj.notes||null,start_ts:new Date(obj.start).toISOString(),status:'open'};
+      const {data,error}=await sb.from('room_logs').insert(row).select('id').single();
+      if(error){console.error(error);return null;} return data.id;
+    }
+    obj.id=RLID++; ROOMLOGS.unshift({...obj,status:'open'}); return obj.id;
+  },
+  async endRoomLog(id, fields){
+    if(USE_SB){
+      const row={end_ts:fields.end?new Date(fields.end).toISOString():null,
+        dur_ms:fields.durMs!=null?fields.durMs:null,
+        notes:fields.notes!=null?fields.notes:undefined,
+        room:fields.room!=null?fields.room:undefined, status:'done'};
+      Object.keys(row).forEach(k=>row[k]===undefined&&delete row[k]);
+      const {error}=await sb.from('room_logs').update(row).eq('id',id); if(error){console.error(error);throw error;} return;
+    }
+    const r=ROOMLOGS.find(x=>x.id===id);
+    if(r){ if(fields.end!=null)r.end=fields.end; if(fields.durMs!=null)r.durMs=fields.durMs;
+      if(fields.notes!=null)r.notes=fields.notes; if(fields.room!=null)r.room=fields.room; r.status='done'; }
+  },
+  async updateRoomLog(id, fields){
+    if(USE_SB){
+      const row={room:fields.room!=null?fields.room:undefined,notes:fields.notes!=null?fields.notes:undefined,
+        start_ts:fields.start?new Date(fields.start).toISOString():undefined,
+        end_ts:fields.end?new Date(fields.end).toISOString():undefined,
+        dur_ms:fields.durMs!=null?fields.durMs:undefined};
+      Object.keys(row).forEach(k=>row[k]===undefined&&delete row[k]);
+      const {error}=await sb.from('room_logs').update(row).eq('id',id); if(error){console.error(error);throw error;} return;
+    }
+    const r=ROOMLOGS.find(x=>x.id===id);
+    if(r){ ['room','notes','start','end','durMs'].forEach(k=>{ if(fields[k]!=null) r[k]=fields[k]; }); }
+  },
+  async deleteRoomLog(id){
+    if(USE_SB){ const {error}=await sb.from('room_logs').delete().eq('id',id); if(error){console.error(error);throw error;} return; }
+    const i=ROOMLOGS.findIndex(x=>x.id===id); if(i>=0) ROOMLOGS.splice(i,1);
   }
 };
 function mapEmp(r){ return {id:r.id,name:r.name,dept:r.dept,pin:r.pin||'',rate:Number(r.rate)||0,
@@ -497,6 +574,9 @@ function mapSess(r){ return {id:r.id,empId:r.emp_id,dept:r.dept,kind:r.kind,labe
   durMs:r.dur_ms?Number(r.dur_ms):null,pay:r.pay?Number(r.pay):null,status:r.status,
   clientPrice:r.client_price?Number(r.client_price):0,
   gps:(r.gps_lat!=null)?{lat:r.gps_lat,lng:r.gps_lng}:null,notes:r.notes}; }
+function mapRoom(r){ return {id:r.id,empId:r.emp_id,sessionId:r.session_id,dept:r.dept,room:r.room,notes:r.notes,
+  start:r.start_ts?new Date(r.start_ts).getTime():null,end:r.end_ts?new Date(r.end_ts).getTime():null,
+  durMs:r.dur_ms?Number(r.dur_ms):null,status:r.status}; }
 
 // ---- Brand / dept config ----
 const DEPTS = {
@@ -536,6 +616,8 @@ const FIELD_JOBS = ['Handy: Repair','Handy: Installation','Handy: Maintenance','
 // ---- Session store (in-memory) ---- // [SUPABASE] all writes -> sessions table
 let SESSIONS = [];   // {id, empId, dept, kind, label, sub, start, end, durMs, pay, status, gps, notes}
 let SID = 1;
+let ROOMLOGS = []; // {id, empId, sessionId, dept, room, notes, start, end, durMs, status}
+let RLID = 1;
 
 // ---- State ----
 let currentUser = null;
@@ -727,6 +809,10 @@ function startClock(){
       const live=$('#liveTimer');
       if(live) live.textContent=fmtDur(Date.now()-activeSession.start);
     }
+    if(activeRoomLog){
+      const rt=$('#roomTimer');
+      if(rt) rt.textContent=fmtDur(Date.now()-activeRoomLog.start);
+    }
     // keep persisted state in sync with the live active session
     if(currentUser){
       if(activeSession) activeByEmp[currentUser.id]=activeSession;
@@ -737,21 +823,34 @@ function startClock(){
 }
 
 /* ============ ROUTER ============ */
-function routeView(){
+async function routeView(){
   const t=DEPTS[currentUser.dept].type;
   if(currentUser.isAdmin) return renderAdmin();
-  if(t==='stops')  return renderStops();
-  if(t==='airbnb') return renderAirbnb();
-  if(t==='hotel')  return renderHotel();
+  // employee: load their room logs first so the panel renders complete
+  await refreshRoomLogs();
+  if(t==='stops')  renderStops();
+  else if(t==='airbnb') renderAirbnb();
+  else if(t==='hotel')  renderHotel();
+  // inject the room/task log panel under every employee tracker
+  const m=$('#mainContent');
+  if(m){ const holder=el('div',null,roomLogPanelHTML()); m.appendChild(holder); }
+  wireGreet();
+  wireRoomLog(routeView);
 }
 
 function greetBlock(){
   const h=new Date().getHours();
   const g=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
-  return `<div class="greet">
-    <div class="greet-1">${g}, ${currentUser.name.split(' ')[0]}.</div>
-    <div class="greet-2">${new Date().toLocaleDateString([],{weekday:'long',month:'long',day:'numeric',year:'numeric'}).toUpperCase()}</div>
+  const histBtn = (currentUser && !currentUser.isAdmin)
+    ? `<button class="btn btn-sm" id="btnMyHistory" style="white-space:nowrap"><i class="ti ti-history"></i>History</button>` : '';
+  return `<div class="greet" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+    <div><div class="greet-1">${g}, ${currentUser.name.split(' ')[0]}.</div>
+    <div class="greet-2">${new Date().toLocaleDateString([],{weekday:'long',month:'long',day:'numeric',year:'numeric'}).toUpperCase()}</div></div>
+    ${histBtn}
   </div>`;
+}
+function wireGreet(){
+  const b=$('#btnMyHistory'); if(b) b.onclick=openMyHistory;
 }
 
 function mySessions(){ return SESSIONS.filter(s=>s.empId===currentUser.id); }
@@ -766,6 +865,171 @@ function todayStats(){
   const pay=ms.reduce((a,s)=>a+(s.pay||0),0);
   return { count:ms.length, totMs, pay };
 }
+
+/* ============ ROOM / TASK LOGS (all teams, independent of clock) ============ */
+let activeRoomLog = null;      // the room currently being timed (separate from activeSession)
+let myRoomLogs = [];           // today's room logs for the current user
+
+async function refreshRoomLogs(){
+  if(USE_SB){ myRoomLogs = await DB.getRoomLogs(currentUser.id, 30); }
+  else { myRoomLogs = await DB.getRoomLogs(currentUser.id, 30); }
+  // resume an open room log if one exists (e.g. page was reloaded)
+  if(!activeRoomLog){ const open=myRoomLogs.find(r=>r.status==='open'); if(open) activeRoomLog=open; }
+}
+
+// Renders the room-log panel. Call after the main tracker HTML is in #mainContent.
+function roomLogPanelHTML(){
+  const today=new Date().toDateString();
+  const todays=myRoomLogs.filter(r=>r.start&&new Date(r.start).toDateString()===today);
+  const doneCount=todays.filter(r=>r.status==='done').length;
+  return `
+  <div class="panel">
+    <div class="panel-h"><div class="panel-ht"><i class="ti ti-clipboard-list"></i>Room / Task Log</div>
+      <div class="panel-hs">${doneCount} logged today</div></div>
+    <div class="panel-b">
+      <div style="font-size:11.5px;color:var(--txt3);margin:-2px 0 14px;line-height:1.6">Track each room or task separately. This does <b style="color:var(--txt2)">not</b> affect your clock-in timer.</div>
+      <div id="roomLogActive"></div>
+      <div id="roomLogToday"></div>
+    </div>
+  </div>`;
+}
+
+function wireRoomLog(rerender){
+  paintRoomLogActive(rerender);
+  paintRoomLogToday(rerender);
+}
+
+function paintRoomLogActive(rerender){
+  const host=$('#roomLogActive'); if(!host) return;
+  if(activeRoomLog){
+    host.innerHTML=`
+      <div style="border:0.5px solid var(--gline);border-radius:10px;background:var(--gdim);padding:14px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div><div style="font-size:10px;color:var(--txt2);letter-spacing:0.08em;text-transform:uppercase">Now working</div>
+            <div style="font-size:16px;font-weight:600;color:var(--gold)">Room ${esc(activeRoomLog.room||'\u2014')}</div></div>
+          <div class="sb-timer" id="roomTimer" style="font-size:20px">00:00:00</div>
+        </div>
+        <div class="field" style="margin-bottom:10px"><span class="field-l">Notes for this room</span>
+          <textarea class="field-t" id="roomNotes" placeholder="Condition, supplies used, issues...">${esc(activeRoomLog.notes||'')}</textarea></div>
+        <button class="clockbtn out" id="btnEndRoom"><i class="ti ti-circle-check"></i>FINISH THIS ROOM</button>
+      </div>`;
+    $('#btnEndRoom').onclick=async()=>{
+      const end=Date.now();
+      const notes=$('#roomNotes').value.trim();
+      activeRoomLog.end=end; activeRoomLog.durMs=end-activeRoomLog.start; activeRoomLog.notes=notes; activeRoomLog.status='done';
+      try{ await DB.endRoomLog(activeRoomLog.id,{end,durMs:activeRoomLog.durMs,notes}); }catch(e){ console.error(e); toast('Could not save room log','err'); return; }
+      toast('Room '+(activeRoomLog.room||'')+' logged \u00b7 '+fmtDur(activeRoomLog.durMs));
+      activeRoomLog=null;
+      await refreshRoomLogs();
+      wireRoomLog(rerender);
+    };
+  } else {
+    host.innerHTML=`
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="field-i" id="roomNum" placeholder="Room # / area (e.g. 214)" autocomplete="off" style="flex:1"/>
+        <button class="btn btn-pri" id="btnStartRoom" style="white-space:nowrap"><i class="ti ti-player-play"></i>Start</button>
+      </div>`;
+    const startFn=async()=>{
+      const room=$('#roomNum').value.trim();
+      if(!room){ toast('Enter a room # or area','err'); return; }
+      const obj={ empId:currentUser.id, sessionId:(activeSession&&activeSession.dbId)?activeSession.dbId:null,
+        dept:currentUser.dept, room, notes:'', start:Date.now(), status:'open' };
+      try{ obj.id=await DB.startRoomLog(obj); }catch(e){ console.error(e); toast('Could not start room log','err'); return; }
+      activeRoomLog=obj;
+      toast('Started room '+room);
+      await refreshRoomLogs();
+      wireRoomLog(rerender);
+    };
+    $('#btnStartRoom').onclick=startFn;
+    $('#roomNum').onkeydown=e=>{ if(e.key==='Enter') startFn(); };
+  }
+}
+
+function paintRoomLogToday(rerender){
+  const host=$('#roomLogToday'); if(!host) return;
+  const today=new Date().toDateString();
+  const todays=myRoomLogs.filter(r=>r.status==='done'&&r.start&&new Date(r.start).toDateString()===today);
+  if(!todays.length){ host.innerHTML='<div class="log-empty" style="padding:14px">No rooms logged yet today.</div>'; return; }
+  host.innerHTML='';
+  todays.forEach(r=>{
+    const row=el('div','log-item'+(r.notes?' has-note':''),`
+      <div class="log-ico"><i class="ti ti-door" style="color:var(--accent2)"></i></div>
+      <div class="log-main"><div class="log-t1">Room ${esc(r.room||'\u2014')} <span class="log-badge lb-done">done</span>${r.notes?' <i class="ti ti-note" style="color:var(--gold);font-size:13px;vertical-align:-2px"></i>':''}</div>
+      <div class="log-t2">${fmtTime(r.start)}\u2013${r.end?fmtTime(r.end):'\u2026'} \u00b7 ${r.durMs?fmtDur(r.durMs):'\u2014'}${r.notes?' \u00b7 \u201c'+esc(r.notes)+'\u201d':''}</div></div>
+      <div class="log-r"><button class="btn btn-sm" data-rledit="${r.id}"><i class="ti ti-edit"></i></button></div>`);
+    host.appendChild(row);
+  });
+  host.querySelectorAll('[data-rledit]').forEach(b=>b.onclick=()=>openRoomLogEdit(myRoomLogs.find(r=>r.id==b.dataset.rledit), rerender));
+}
+
+function openRoomLogEdit(r, rerender){
+  if(!r) return;
+  const body=`
+    <div class="field"><span class="field-l">Room / area</span><input class="field-i" id="rlRoom" value="${esc(r.room||'')}"/></div>
+    <div class="field-row">
+      <div class="field"><span class="field-l">Start</span><input class="field-i" id="rlStart" type="time" value="${toTimeInput(r.start)}"/></div>
+      <div class="field"><span class="field-l">End</span><input class="field-i" id="rlEnd" type="time" value="${r.end?toTimeInput(r.end):''}"/></div>
+    </div>
+    <div class="field"><span class="field-l">Notes</span><textarea class="field-t" id="rlNotes">${esc(r.notes||'')}</textarea></div>`;
+  openModal('Edit room log', body, [
+    {label:'Delete', cls:'btn-danger', fn:async()=>{ if(confirm('Delete this room log?')){ await DB.deleteRoomLog(r.id); await refreshRoomLogs(); closeModal(); wireRoomLog(rerender); toast('Room log deleted'); } }},
+    {label:'Save', cls:'btn-pri', fn:async()=>{
+      const room=$('#rlRoom').value.trim();
+      const start=fromTimeInput(r.start,$('#rlStart').value);
+      const end=$('#rlEnd').value?fromTimeInput(r.start,$('#rlEnd').value):null;
+      const durMs=(start&&end)?(end-start):r.durMs;
+      await DB.updateRoomLog(r.id,{room,notes:$('#rlNotes').value.trim(),start,end,durMs});
+      await refreshRoomLogs(); closeModal(); wireRoomLog(rerender); toast('Room log updated');
+    }}
+  ]);
+}
+
+/* ============ EMPLOYEE HISTORY (last 30 days) ============ */
+async function openMyHistory(){
+  let sess=[], rooms=[];
+  if(USE_SB){ sess=await DB.getSessionsSince(currentUser.id,30); rooms=await DB.getRoomLogs(currentUser.id,30); }
+  else { sess=await DB.getSessionsSince(currentUser.id,30); rooms=await DB.getRoomLogs(currentUser.id,30); }
+  // group by day
+  const byDay={};
+  sess.forEach(s=>{ const k=new Date(s.start).toDateString(); (byDay[k]=byDay[k]||{sess:[],rooms:[]}).sess.push(s); });
+  rooms.forEach(r=>{ if(!r.start)return; const k=new Date(r.start).toDateString(); (byDay[k]=byDay[k]||{sess:[],rooms:[]}).rooms.push(r); });
+  const days=Object.keys(byDay).sort((a,b)=>new Date(b)-new Date(a));
+  let html='';
+  if(!days.length){ html='<div class="log-empty" style="padding:24px">No activity in the last 30 days.</div>'; }
+  days.forEach(k=>{
+    const g=byDay[k];
+    const totMs=g.sess.reduce((a,s)=>a+(s.durMs||0),0);
+    const pay=g.sess.reduce((a,s)=>a+(s.pay||0),0);
+    const dt=new Date(k);
+    html+=`<div style="margin-bottom:18px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 2px 8px;border-bottom:0.5px solid var(--line2);margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600">${dt.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})}</div>
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:var(--txt3)">${g.sess.length} job${g.sess.length===1?'':'s'} \u00b7 ${(totMs/3600000).toFixed(1)}h${pay?' \u00b7 '+fmtMoney(pay):''}</div>
+      </div>`;
+    g.sess.forEach(s=>{
+      html+=`<div class="log-item${s.notes?' has-note':''}" style="cursor:default">
+        <div class="log-ico"><i class="ti ${(DEPTS[s.dept]||{}).icon||'ti-clock'}" style="color:${(DEPTS[s.dept]||{}).color||'var(--gold)'}"></i></div>
+        <div class="log-main"><div class="log-t1">${esc(s.label||'')} <span class="log-badge lb-done">${s.kind}</span>${s.notes?' <i class="ti ti-note" style="color:var(--gold);font-size:12px;vertical-align:-2px"></i>':''}</div>
+        <div class="log-t2">${fmtTime(s.start)}\u2013${s.end?fmtTime(s.end):'\u2026'}${s.notes?' \u00b7 \u201c'+esc(s.notes)+'\u201d':''}</div></div>
+        <div class="log-r"><div class="log-dur">${s.durMs?fmtDur(s.durMs):'\u2014'}</div><div class="log-pay">${s.pay?fmtMoney(s.pay):''}</div></div>
+      </div>`;
+    });
+    g.rooms.forEach(r=>{
+      html+=`<div class="log-item${r.notes?' has-note':''}" style="cursor:default">
+        <div class="log-ico"><i class="ti ti-door" style="color:var(--accent2)"></i></div>
+        <div class="log-main"><div class="log-t1">Room ${esc(r.room||'\u2014')} <span class="log-badge" style="background:var(--adim);color:var(--accent2)">room log</span></div>
+        <div class="log-t2">${fmtTime(r.start)}\u2013${r.end?fmtTime(r.end):'\u2026'}${r.notes?' \u00b7 \u201c'+esc(r.notes)+'\u201d':''}</div></div>
+        <div class="log-r"><div class="log-dur">${r.durMs?fmtDur(r.durMs):'\u2014'}</div></div>
+      </div>`;
+    });
+    html+=`</div>`;
+  });
+  openModal('My last 30 days', html, [{label:'Close', cls:'btn-pri', fn:closeModal}]);
+}
+
+// time-input helpers (HH:MM on the same calendar day as `ref`)
+function toTimeInput(ts){ const d=new Date(ts); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+function fromTimeInput(refTs, val){ if(!val) return null; const [h,m]=val.split(':').map(Number); const d=new Date(refTs); d.setHours(h,m,0,0); return d.getTime(); }
 
 /* ============ STOPS TRACKER (Rivus / Handy) ============ */
 function renderStops(){
@@ -834,7 +1098,7 @@ async function clockInStop(){
     label:loc, sub:job, client, start:Date.now(), gps:lastGps, notes:'', status:'active'
   };
   toast('Clocked in \u00b7 '+loc);
-  await beginActive(obj, renderStops);
+  await beginActive(obj, routeView);
 }
 async function clockOutStop(){
   if(!activeSession) return;
@@ -847,7 +1111,7 @@ async function clockOutStop(){
   await refreshSessions();
   toast('Stop complete \u00b7 '+fmtDur(activeSession.durMs));
   activeSession=null;
-  renderStops();
+  routeView();
 }
 function renderStopsLog(){
   const body=$('#logBody');
@@ -931,7 +1195,7 @@ function renderAirbnb(){
       await DB.saveSession({...activeSession});
       await refreshSessions();
       toast('Turnover complete \u00b7 '+fmtMoney(activeSession.pay));
-      activeSession=null; selectedProp=null; renderAirbnb();
+      activeSession=null; selectedProp=null; routeView();
     };
   }else{
     const grid=$('#propGrid'), search=$('#propSearch');
@@ -963,7 +1227,7 @@ function renderAirbnb(){
       const obj={ id:SID++, empId:currentUser.id, dept:'airbnb', kind:'clean',
         label:p.name, sub:p.addr, rate:p.payRate, clientPrice:p.clientPrice, start:Date.now(), notes:'', status:'active' };
       toast('Started \u00b7 '+p.name);
-      await beginActive(obj, renderAirbnb);
+      await beginActive(obj, routeView);
     };
   }
   renderCleanLog();
@@ -1030,7 +1294,7 @@ function renderHotel(){
       await DB.saveSession({...activeSession});
       await refreshSessions();
       toast('Shift ended \u00b7 '+fmtDur(activeSession.durMs));
-      activeSession=null; renderHotel();
+      activeSession=null; routeView();
     };
   }else{
     hb.innerHTML=`
@@ -1047,7 +1311,7 @@ function renderHotel(){
         label:name, sub:$('#hotelShift').value+' \u00b7 '+($('#hotelFloor').value||'all'),
         start:Date.now(), notes:'', status:'active' };
       toast('Clocked in \u00b7 '+name);
-      await beginActive(obj, renderHotel);
+      await beginActive(obj, routeView);
     };
   }
   // log
@@ -1081,6 +1345,7 @@ function renderGps(){
 
 /* ============ ADMIN ============ */
 let adminTab='team';
+let adminLogOpen={}; // remembers which employee log groups are expanded
 async function renderAdmin(){
   if(USE_SB){ SESSIONS = await DB.getSessions(null); EMPLOYEES = await DB.getEmployees(); }
   const m=$('#mainContent');
@@ -1330,25 +1595,83 @@ async function renderAdminProfit(){
   pane.innerHTML = card('This Week', ws) + card('This Month', monthStart) +
     `<div style="font-size:10px;color:var(--txt3);line-height:1.7;padding:0 4px">Revenue = client price on completed turnovers. Pay = what employees earned. Profit = revenue \u2212 pay. Revenue currently tracks Airbnb client pricing; hourly departments show labor cost (revenue not yet captured for those). Want me to add client billing for hotel/field jobs too? Just ask.</div>`;
 }
-function renderAdminLogs(){
+async function renderAdminLogs(){
   const pane=$('#adminPane');
+  // pull room logs too (last 30 days) so admins see sub-tasks per person
+  let roomLogs=[];
+  if(USE_SB){ roomLogs = await DB.getRoomLogs(null, 30); }
+  else { roomLogs = ROOMLOGS.slice(); }
+
+  // group sessions + room logs by employee
+  const groups={};
+  SESSIONS.forEach(s=>{ (groups[s.empId]=groups[s.empId]||{sess:[],rooms:[]}).sess.push(s); });
+  roomLogs.forEach(r=>{ (groups[r.empId]=groups[r.empId]||{sess:[],rooms:[]}).rooms.push(r); });
+
+  const empIds=Object.keys(groups).sort((a,b)=>{
+    const na=(EMPLOYEES.find(e=>e.id==a)||{}).name||'zzz';
+    const nb=(EMPLOYEES.find(e=>e.id==b)||{}).name||'zzz';
+    return na.localeCompare(nb);
+  });
+
   pane.innerHTML=`<div class="panel">
-    <div class="panel-h"><div class="panel-ht"><i class="ti ti-history"></i>All Session Logs</div><div class="panel-hs">${SESSIONS.length} total</div></div>
-    <div class="panel-b" id="allLogs"></div></div>`;
-  const body=$('#allLogs');
-  if(!SESSIONS.length){ body.innerHTML='<div class="log-empty">No sessions recorded yet. Logs from all employees will appear here.</div>'; return; }
-  body.innerHTML='';
-  SESSIONS.forEach(s=>{
-    const emp=EMPLOYEES.find(e=>e.id===s.empId);
-    const d=DEPTS[s.dept];
-    const row=el('div','log-item'+(s.notes?' has-note':''),`
-      <div class="log-ico"><i class="ti ${d.icon}" style="color:${d.color}"></i></div>
-      <div class="log-main"><div class="log-t1">${emp?emp.name:'Unknown'} \u00b7 ${s.label} <span class="log-badge lb-done">${s.kind}</span>${s.notes?' <i class="ti ti-note" style="color:var(--gold);font-size:13px;vertical-align:-2px" title="Has notes"></i>':''}</div>
-      <div class="log-t2">${d.label} \u00b7 ${new Date(s.start).toLocaleDateString()} ${fmtTime(s.start)}\u2013${s.end?fmtTime(s.end):'\u2026'}${s.notes?' \u00b7 \u201c'+esc(s.notes)+'\u201d':''}</div></div>
-      <div class="log-r"><div class="log-dur">${s.durMs?fmtDur(s.durMs):'\u2014'}</div><div class="log-pay">${s.pay?fmtMoney(s.pay):''}</div></div>`);
-    row.style.cursor='pointer';
-    row.onclick=()=>openSessionDetail(s, emp?emp.name:'Unknown');
-    body.appendChild(row);
+    <div class="panel-h"><div class="panel-ht"><i class="ti ti-users-group"></i>Logs by Employee</div>
+      <div class="panel-hs">${SESSIONS.length} session${SESSIONS.length===1?'':'s'}</div></div>
+    <div class="panel-b" id="empLogGroups" style="padding:10px"></div></div>`;
+  const host=$('#empLogGroups');
+  if(!empIds.length){ host.innerHTML='<div class="log-empty">No sessions recorded yet. Logs from all employees will appear here, organized by person.</div>'; return; }
+
+  empIds.forEach(id=>{
+    const emp=EMPLOYEES.find(e=>e.id==id);
+    const g=groups[id];
+    const totMs=g.sess.reduce((a,s)=>a+(s.durMs||0),0);
+    const pay=g.sess.reduce((a,s)=>a+(s.pay||0),0);
+    const d=emp?DEPTS[emp.dept]:null;
+    const open = adminLogOpen[id] ? ' open' : '';
+    const grp=el('div','elog-group'+open);
+    grp.innerHTML=`
+      <div class="elog-head" data-grp="${id}">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <div class="elog-av" style="background:${d?d.color:'#444'}22;color:${d?d.color:'#888'}">${emp?initials(emp.name):'?'}</div>
+          <div style="min-width:0">
+            <div class="elog-name">${emp?emp.name:'Unknown employee'}</div>
+            <div class="elog-sub">${d?d.label:''} \u00b7 ${g.sess.length} session${g.sess.length===1?'':'s'}${g.rooms.length?(' \u00b7 '+g.rooms.length+' room log'+(g.rooms.length===1?'':'s')):''}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
+          <div style="text-align:right"><div class="elog-h">${(totMs/3600000).toFixed(1)}h</div><div class="elog-p">${pay?fmtMoney(pay):''}</div></div>
+          <i class="ti ti-chevron-down elog-chev"></i>
+        </div>
+      </div>
+      <div class="elog-body"></div>`;
+    host.appendChild(grp);
+
+    const bodyEl=grp.querySelector('.elog-body');
+    // sessions
+    g.sess.forEach(s=>{
+      const dd=DEPTS[s.dept]||{};
+      const row=el('div','log-item'+(s.notes?' has-note':''),`
+        <div class="log-ico"><i class="ti ${dd.icon||'ti-clock'}" style="color:${dd.color||'var(--gold)'}"></i></div>
+        <div class="log-main"><div class="log-t1">${esc(s.label||'')} <span class="log-badge lb-done">${s.kind}</span>${s.notes?' <i class="ti ti-note" style="color:var(--gold);font-size:13px;vertical-align:-2px" title="Has notes"></i>':''}</div>
+        <div class="log-t2">${new Date(s.start).toLocaleDateString()} ${fmtTime(s.start)}\u2013${s.end?fmtTime(s.end):'\u2026'}${s.notes?' \u00b7 \u201c'+esc(s.notes)+'\u201d':''}</div></div>
+        <div class="log-r"><div class="log-dur">${s.durMs?fmtDur(s.durMs):'\u2014'}</div><div class="log-pay">${s.pay?fmtMoney(s.pay):''}</div></div>`);
+      row.style.cursor='pointer';
+      row.onclick=()=>openSessionDetail(s, emp?emp.name:'Unknown');
+      bodyEl.appendChild(row);
+    });
+    // room logs
+    g.rooms.forEach(r=>{
+      const row=el('div','log-item'+(r.notes?' has-note':''),`
+        <div class="log-ico"><i class="ti ti-door" style="color:var(--accent2)"></i></div>
+        <div class="log-main"><div class="log-t1">Room ${esc(r.room||'\u2014')} <span class="log-badge" style="background:var(--adim);color:var(--accent2)">room log</span>${r.notes?' <i class="ti ti-note" style="color:var(--gold);font-size:13px;vertical-align:-2px"></i>':''}</div>
+        <div class="log-t2">${r.start?new Date(r.start).toLocaleDateString():''} ${r.start?fmtTime(r.start):''}\u2013${r.end?fmtTime(r.end):'\u2026'}${r.notes?' \u00b7 \u201c'+esc(r.notes)+'\u201d':''}</div></div>
+        <div class="log-r"><div class="log-dur">${r.durMs?fmtDur(r.durMs):'\u2014'}</div></div>`);
+      bodyEl.appendChild(row);
+    });
+
+    grp.querySelector('.elog-head').onclick=()=>{
+      const isOpen=grp.classList.toggle('open');
+      adminLogOpen[id]=isOpen;
+    };
   });
 }
 function esc(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1468,6 +1791,17 @@ function exportCSV(){
 }
 
 /* ============ MODAL ============ */
+function openModal(title, bodyHTML, buttons){
+  $('#modalTitle').textContent=title;
+  $('#modalBody').innerHTML=bodyHTML;
+  const foot=$('#modalFoot'); foot.innerHTML='';
+  (buttons||[]).forEach((b,i)=>{
+    const btn=el('button','btn '+(b.cls||'btn-ghost'),b.label);
+    btn.id='mdlBtn'+i; btn.onclick=b.fn; foot.appendChild(btn);
+  });
+  $('#modalBg').classList.add('show');
+  $('#modalX').onclick=closeModal;
+}
 function closeModal(){ $('#modalBg').classList.remove('show'); }
 $('#modalBg').onclick=e=>{ if(e.target===$('#modalBg')) closeModal(); };
 
