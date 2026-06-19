@@ -244,8 +244,15 @@ img{display:block;max-width:100%}
   .hl-row2{font-size:clamp(44px,6.5vw,78px)}
 }
 @media(max-width:900px){
-  .nav-links,.nav-r .btn-emp{display:none}
-  .nav{padding:0 24px}
+  .nav-links,.nav-r .btn-emp,.nav-live,.nav-wordmark .n2{display:none}
+  .nav{padding:0 16px;gap:8px}
+  .nav-brand{min-width:0;flex:1;gap:9px}
+  .nav-logo{height:34px;flex-shrink:0}
+  .nav-wordmark{min-width:0}
+  .nav-wordmark .n1{font-size:13px;line-height:1.2;font-weight:600}
+  .nav-r{flex-shrink:0;gap:8px}
+  .nav-r .btn-cta{font-size:10px;padding:9px 11px;white-space:nowrap;letter-spacing:0.04em}
+  .nav-burger{width:36px;height:36px;flex-shrink:0}
   .hero-inner{padding:48px 24px}
   .change-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
   .cs-item{border-right:none;margin-right:0;padding:0}
@@ -292,13 +299,13 @@ img{display:block;max-width:100%}
     <a href="founders.html">Founders</a>
     <a href="culture.html">Culture</a>
     <a href="initiative.html">Be the C.H.A.N.G.E.</a>
-    <a href="#contact">Contact</a>
+    <a href="contact.html">Contact</a>
   </nav>
   <button class="nav-burger" id="navBurger" aria-label="Menu"><span></span><span></span><span></span></button>
   <div class="nav-r">
     <div class="nav-live"><span class="live-dot"></span>ALL SYSTEMS OPERATIONAL</div>
     <a href="portal.html" class="btn-emp">EMPLOYEE LOGIN</a>
-    <a href="#contact" class="btn-cta">PARTNER WITH CDG</a>
+    <a href="contact.html" class="btn-cta">PARTNER WITH CDG</a>
   </div>
 </header>
 
@@ -309,11 +316,11 @@ img{display:block;max-width:100%}
   <a href="founders.html">Founders</a>
   <a href="culture.html">Culture</a>
   <a href="initiative.html">Be the C.H.A.N.G.E.</a>
-  <a href="index.html#contact">Contact</a>
+  <a href="contact.html">Contact</a>
   <div class="mm-div"></div>
   <div class="mm-btns">
     <a href="portal.html" class="mm-emp">EMPLOYEE LOGIN</a>
-    <a href="index.html#contact" class="mm-cta">PARTNER WITH CDG</a>
+    <a href="contact.html" class="mm-cta">PARTNER WITH CDG</a>
   </div>
 </div>
 
@@ -349,7 +356,7 @@ img{display:block;max-width:100%}
 
     <div class="hero-acts">
       <a href="#companies" class="ha-primary">EXPLORE OUR PORTFOLIO <i class="ti ti-arrow-right" style="font-size:12px"></i></a>
-      <a href="#contact" class="ha-secondary">PARTNER WITH CDG <i class="ti ti-arrow-right" style="font-size:12px"></i></a>
+      <a href="contact.html" class="ha-secondary">PARTNER WITH CDG <i class="ti ti-arrow-right" style="font-size:12px"></i></a>
     </div>
 
     <div class="change-strip">
@@ -585,31 +592,14 @@ img{display:block;max-width:100%}
     </div>
     <div class="ccard">
       <div class="ccard-tag">START THE CONVERSATION</div>
-      <div id="contactForm">
-        <div class="crow2">
-          <div class="cfield"><label>Name <span class="rq">*</span></label><input class="cinput" id="ctName" placeholder="Your name"/></div>
-          <div class="cfield"><label>Email <span class="rq">*</span></label><input class="cinput" id="ctEmail" type="email" placeholder="you@email.com"/></div>
-        </div>
-        <div class="cfield"><label>What's this about?</label>
-          <select class="cselect" id="ctTopic">
-            <option>Partnership</option>
-            <option>Service request / quote</option>
-            <option>Investment conversation</option>
-            <option>Be the C.H.A.N.G.E. Initiative</option>
-            <option>Careers / join the team</option>
-            <option>Something else</option>
-          </select>
-        </div>
-        <div class="cfield"><label>Message <span class="rq">*</span></label><textarea class="ctext" id="ctMsg" placeholder="Tell us what you have in mind..."></textarea></div>
-        <div class="cerr" id="ctErr"></div>
-        <button class="btn-gold" id="ctSend">SEND A MESSAGE TO CDG</button>
-        <div style="text-align:center;margin-top:12px;font-size:10px;color:var(--txt3);font-family:'Space Mono',monospace">or email <a href="mailto:info@changdevgrp.com" style="color:var(--gold)">info@changdevgrp.com</a> &middot; Florida, USA</div>
+      <p style="font-size:14px;color:var(--txt2);line-height:1.85;margin-bottom:22px">Tell us which department you'd like to reach — one of our five brands, a partnership, careers, or press — and we'll route your message to the right team. It takes about a minute.</p>
+      <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:24px">
+        <div style="display:flex;align-items:center;gap:12px;font-size:13px;color:var(--txt2)"><i class="ti ti-mail" style="color:var(--gold);font-size:17px"></i> Pick a department &amp; send a message</div>
+        <div style="display:flex;align-items:center;gap:12px;font-size:13px;color:var(--txt2)"><i class="ti ti-clock" style="color:var(--gold);font-size:17px"></i> We reply within 1&ndash;2 business days</div>
+        <div style="display:flex;align-items:center;gap:12px;font-size:13px;color:var(--txt2)"><i class="ti ti-map-pin" style="color:var(--gold);font-size:17px"></i> Florida, USA</div>
       </div>
-      <div class="csuccess" id="contactSuccess">
-        <div class="ci"><i class="ti ti-mail-check"></i></div>
-        <div class="ct">Message sent!</div>
-        <div class="cd">Thanks for reaching out — we'll get back to you soon.</div>
-      </div>
+      <a href="contact.html" class="btn-gold" style="text-decoration:none">GO TO THE CONTACT PAGE</a>
+      <div style="text-align:center;margin-top:12px;font-size:10px;color:var(--txt3);font-family:'Space Mono',monospace">or email <a href="mailto:info@changdevgrp.com" style="color:var(--gold)">info@changdevgrp.com</a></div>
     </div>
   </div>
 </section>
@@ -628,7 +618,7 @@ img{display:block;max-width:100%}
     <a href="initiative.html">Be the C.H.A.N.G.E.</a>
     <a href="portal.html">Employee Hub</a>
     <a href="privacy.html">Privacy</a>
-    <a href="#contact">Contact</a>
+    <a href="contact.html">Contact</a>
   </div>
   <div class="f-right"><span class="f-acc">changdevgrp.com</span><br>Florida, USA &middot; LLC</div>
 </footer>
