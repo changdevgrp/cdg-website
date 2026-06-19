@@ -146,6 +146,9 @@ button{font-family:'Space Grotesk',sans-serif;cursor:pointer}
 /* session log */
 .log-empty{text-align:center;padding:30px;color:var(--txt3);font-size:12px}
 .log-item{display:flex;align-items:center;gap:14px;padding:13px 16px;border:0.5px solid var(--line2);border-radius:9px;background:var(--bg3);margin-bottom:8px}
+.log-item.has-note:hover{border-color:var(--gline);background:var(--bg4)}
+.sd-row{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:0.5px solid var(--line2);padding-bottom:8px}
+.sd-l{font-size:12px;color:var(--txt3)}.sd-v{font-size:13px;color:var(--txt);text-align:right}
 .log-ico{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:var(--bg4)}
 .log-main{flex:1;min-width:0}
 .log-t1{font-size:12px;font-weight:500;margin-bottom:2px}
@@ -403,18 +406,39 @@ const DB = {
     const i=DEMO_PROPERTIES.findIndex(x=>x.id===id); if(i>=0) DEMO_PROPERTIES.splice(i,1);
   },
   async getSessions(empId){
-    if(USE_SB){ let q=sb.from('sessions').select('*').order('start_ts',{ascending:false});
+    if(USE_SB){ let q=sb.from('sessions').select('*').eq('status','done').order('start_ts',{ascending:false});
       if(empId!=null) q=q.eq('emp_id',empId);
       const {data,error}=await q; if(error){console.error(error);return [];} return data.map(mapSess); }
     return empId!=null ? SESSIONS.filter(s=>s.empId===empId) : SESSIONS;
   },
-  async saveSession(s){
+  // Insert an ACTIVE (in-progress) session at clock-in so it syncs across devices.
+  async startSession(s){
     if(USE_SB){ const row={emp_id:s.empId,dept:s.dept,kind:s.kind,label:s.label,sub:s.sub,client:s.client||null,
-        start_ts:new Date(s.start).toISOString(),end_ts:s.end?new Date(s.end).toISOString():null,
-        dur_ms:s.durMs||null,pay:s.pay||null,status:s.status||'done',
-        client_price:s.clientPrice||null,pay_amt:s.pay||null,
-        gps_lat:s.gps?s.gps.lat:null,gps_lng:s.gps?s.gps.lng:null,notes:s.notes||null};
-      const {error}=await sb.from('sessions').insert(row); if(error)console.error(error); return; }
+        start_ts:new Date(s.start).toISOString(),status:'active',
+        client_price:s.clientPrice||null,gps_lat:s.gps?s.gps.lat:null,gps_lng:s.gps?s.gps.lng:null};
+      const {data,error}=await sb.from('sessions').insert(row).select('id').single();
+      if(error){console.error(error);return null;} return data.id; }
+    return null;
+  },
+  // Find an open session for this employee (used to resume on another device).
+  async getActiveSession(empId){
+    if(USE_SB){ const {data,error}=await sb.from('sessions').select('*').eq('emp_id',empId).eq('status','active').is('end_ts',null).order('start_ts',{ascending:false}).limit(1);
+      if(error){console.error(error);return null;} if(!data||!data.length) return null;
+      const o=mapSess(data[0]); o.dbId=data[0].id; o.status='active'; return o; }
+    return null;
+  },
+  async saveSession(s){
+    if(USE_SB){
+      const fields={end_ts:s.end?new Date(s.end).toISOString():null,dur_ms:s.durMs||null,
+        pay:s.pay||null,pay_amt:s.pay||null,status:s.status||'done',
+        client_price:s.clientPrice||null,notes:s.notes||null};
+      if(s.dbId){ // finalize the active row created at clock-in
+        const {error}=await sb.from('sessions').update(fields).eq('id',s.dbId); if(error)console.error(error); return; }
+      // fallback: insert a complete row (e.g. clock-in DB write had failed)
+      const row={emp_id:s.empId,dept:s.dept,kind:s.kind,label:s.label,sub:s.sub,client:s.client||null,
+        start_ts:new Date(s.start).toISOString(),gps_lat:s.gps?s.gps.lat:null,gps_lng:s.gps?s.gps.lng:null,...fields};
+      const {error}=await sb.from('sessions').insert(row); if(error)console.error(error); return;
+    }
     SESSIONS.unshift({...s});
   }
 };
@@ -470,7 +494,31 @@ let SID = 1;
 // ---- State ----
 let currentUser = null;
 let activeSession = null;   // currently running session object
+let activeByEmp = {};       // empId -> active session (survives logout/refresh)
 let tickHandle = null;
+
+/* ---- Persistence (survives refresh & logout). Stored locally on the device.
+   Wrapped in try/catch so it degrades silently if storage is unavailable
+   (e.g. the in-chat preview sandbox); works normally on the live domain. ---- */
+const LS_KEY='cdg_portal_state_v1';
+function saveState(){
+  try{
+    const s={ user: currentUser, activeByEmp, sid: SID };
+    if(!USE_SB) s.sessions = SESSIONS;   // demo mode: keep logged sessions too
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
+  }catch(e){}
+}
+function loadState(){
+  try{
+    const raw=localStorage.getItem(LS_KEY); if(!raw) return false;
+    const s=JSON.parse(raw);
+    if(s.sid) SID=s.sid;
+    if(s.activeByEmp) activeByEmp=s.activeByEmp;
+    if(!USE_SB && Array.isArray(s.sessions)) SESSIONS=s.sessions;
+    if(s.user){ currentUser=s.user; activeSession=activeByEmp[currentUser.id]||null; return true; }
+  }catch(e){}
+  return false;
+}
 
 // ---- Helpers ----
 const $ = s => document.querySelector(s);
@@ -523,10 +571,10 @@ function pressKey(k){
 async function submitPin(){
   if(pinBuf===ADMIN_PIN){
     currentUser={ id:0, name:'Pablo Chang', dept:'admin', pin:ADMIN_PIN, rate:0, isAdmin:true };
-    await enterApp(); return;
+    activeSession=activeByEmp[0]||null; saveState(); await enterApp(); return;
   }
   const emp=await DB.verifyPin(pinBuf);
-  if(emp){ currentUser={...emp, isAdmin:emp.dept==='admin'}; await enterApp(); }
+  if(emp){ currentUser={...emp, isAdmin:emp.dept==='admin'}; activeSession=activeByEmp[currentUser.id]||null; saveState(); await enterApp(); }
   else{
     updatePinDisplay(true);
     $('#loginErr').textContent='Invalid PIN. Try again.';
@@ -549,15 +597,37 @@ async function enterApp(){
   if(USE_SB){
     if(currentUser.dept==='airbnb'){ PROPERTIES = await DB.getProperties(); }
     await refreshSessions();
+    // The DB is the source of truth for an in-progress clock-in, so a session
+    // started on one device resumes on any other device.
+    try{
+      const dbActive = await DB.getActiveSession(currentUser.id);
+      activeSession = dbActive || null;
+      if(dbActive) activeByEmp[currentUser.id]=dbActive; else delete activeByEmp[currentUser.id];
+      saveState();
+    }catch(e){ console.error(e); }
   }
   routeView();
 }
 function logout(){
-  if(activeSession){ if(!confirm('You are still clocked in. Log out anyway? Your active session will keep running in memory.')) return; }
-  currentUser=null;
+  // Active sessions are preserved per-employee and resume on next login,
+  // so logging out never loses in-progress work (and never blocks on a dialog).
+  clearInterval(tickHandle);
+  if(currentUser){
+    if(activeSession){ activeByEmp[currentUser.id]=activeSession; toast('Logged out \u2014 your clock is still running, log back in to resume'); }
+    else delete activeByEmp[currentUser.id];
+  }
+  currentUser=null; activeSession=null;
+  saveState();
   $('#app').classList.remove('active');
   $('#loginScreen').style.display='flex';
   updatePinDisplay();
+}
+// Start an active session: writes it to the DB (live mode) so it syncs across devices.
+async function beginActive(obj, rerender){
+  if(USE_SB){ try{ obj.dbId = await DB.startSession(obj); }catch(e){ console.error(e); } }
+  activeSession = obj;
+  if(currentUser){ activeByEmp[currentUser.id]=obj; saveState(); }
+  rerender();
 }
 
 /* ============ CLOCK ============ */
@@ -568,6 +638,12 @@ function startClock(){
     if(activeSession){
       const live=$('#liveTimer');
       if(live) live.textContent=fmtDur(Date.now()-activeSession.start);
+    }
+    // keep persisted state in sync with the live active session
+    if(currentUser){
+      if(activeSession) activeByEmp[currentUser.id]=activeSession;
+      else delete activeByEmp[currentUser.id];
+      saveState();
     }
   },1000);
 }
@@ -660,18 +736,17 @@ function renderStops(){
   renderGps();
   renderStopsLog();
 }
-function clockInStop(){
+async function clockInStop(){
   const loc=$('#stopLoc').value.trim();
   if(!loc){ toast('Enter a location first','err'); return; }
   const job=$('#stopJob').value;
   const client=$('#stopClient').value.trim();
-  activeSession={
+  const obj={
     id:SID++, empId:currentUser.id, dept:currentUser.dept, kind:'stop',
     label:loc, sub:job, client, start:Date.now(), gps:lastGps, notes:'', status:'active'
   };
-  // [SUPABASE] insert into sessions (...)
   toast('Clocked in \u00b7 '+loc);
-  renderStops();
+  await beginActive(obj, renderStops);
 }
 async function clockOutStop(){
   if(!activeSession) return;
@@ -794,12 +869,13 @@ function renderAirbnb(){
     }
     search.oninput=paintProps;
     paintProps();
-    $('#btnStartClean').onclick=()=>{
+    $('#btnStartClean').onclick=async()=>{
       if(!selectedProp){ toast('Select a property first','err'); return; }
       const p=PROPERTIES.find(x=>x.id===selectedProp);
-      activeSession={ id:SID++, empId:currentUser.id, dept:'airbnb', kind:'clean',
+      const obj={ id:SID++, empId:currentUser.id, dept:'airbnb', kind:'clean',
         label:p.name, sub:p.addr, rate:p.payRate, clientPrice:p.clientPrice, start:Date.now(), notes:'', status:'active' };
-      toast('Started \u00b7 '+p.name); renderAirbnb();
+      toast('Started \u00b7 '+p.name);
+      await beginActive(obj, renderAirbnb);
     };
   }
   renderCleanLog();
@@ -811,11 +887,14 @@ function renderCleanLog(){
   if(!items.length){ body.innerHTML='<div class="log-empty">No turnovers completed yet today.</div>'; return; }
   body.innerHTML='';
   items.forEach(s=>{
-    body.appendChild(el('div','log-item',`
+    const row=el('div','log-item'+(s.notes?' has-note':''),`
       <div class="log-ico"><i class="ti ti-sparkles" style="color:var(--green)"></i></div>
-      <div class="log-main"><div class="log-t1">${s.label} <span class="log-badge lb-done">done</span></div>
-      <div class="log-t2">${fmtTime(s.start)}\u2013${fmtTime(s.end)} \u00b7 ${fmtDur(s.durMs)}${s.notes?' \u00b7 \u201c'+s.notes.slice(0,30)+'\u201d':''}</div></div>
-      <div class="log-r"><div class="log-dur">${fmtMoney(s.pay)}</div><div class="log-pay">flat rate</div></div>`));
+      <div class="log-main"><div class="log-t1">${s.label} <span class="log-badge lb-done">done</span>${s.notes?' <i class="ti ti-note" style="color:var(--gold);font-size:13px;vertical-align:-2px"></i>':''}</div>
+      <div class="log-t2">${fmtTime(s.start)}\u2013${fmtTime(s.end)} \u00b7 ${fmtDur(s.durMs)}${s.notes?' \u00b7 tap to view note':''}</div></div>
+      <div class="log-r"><div class="log-dur">${fmtMoney(s.pay)}</div><div class="log-pay">flat rate</div></div>`);
+    row.style.cursor='pointer';
+    row.onclick=()=>openSessionDetail(s, null);
+    body.appendChild(row);
   });
 }
 
@@ -873,13 +952,14 @@ function renderHotel(){
         <div class="field"><span class="field-l">Floor / section</span><input class="field-i" id="hotelFloor" placeholder="e.g. Floors 3\u20135"/></div>
       </div>
       <button class="clockbtn in" id="btnStartShift"><i class="ti ti-clock-play"></i>CLOCK IN &amp; START SHIFT</button>`;
-    $('#btnStartShift').onclick=()=>{
+    $('#btnStartShift').onclick=async()=>{
       const name=$('#hotelName').value.trim();
       if(!name){ toast('Enter the hotel name','err'); return; }
-      activeSession={ id:SID++, empId:currentUser.id, dept:'hotel', kind:'shift',
+      const obj={ id:SID++, empId:currentUser.id, dept:'hotel', kind:'shift',
         label:name, sub:$('#hotelShift').value+' \u00b7 '+($('#hotelFloor').value||'all'),
-        start:Date.now(), status:'active' };
-      toast('Clocked in \u00b7 '+name); renderHotel();
+        start:Date.now(), notes:'', status:'active' };
+      toast('Clocked in \u00b7 '+name);
+      await beginActive(obj, renderHotel);
     };
   }
   // log
@@ -1169,12 +1249,39 @@ function renderAdminLogs(){
   SESSIONS.forEach(s=>{
     const emp=EMPLOYEES.find(e=>e.id===s.empId);
     const d=DEPTS[s.dept];
-    body.appendChild(el('div','log-item',`
+    const row=el('div','log-item'+(s.notes?' has-note':''),`
       <div class="log-ico"><i class="ti ${d.icon}" style="color:${d.color}"></i></div>
-      <div class="log-main"><div class="log-t1">${emp?emp.name:'Unknown'} \u00b7 ${s.label} <span class="log-badge lb-done">${s.kind}</span></div>
-      <div class="log-t2">${d.label} \u00b7 ${new Date(s.start).toLocaleDateString()} ${fmtTime(s.start)}\u2013${s.end?fmtTime(s.end):'\u2026'}</div></div>
-      <div class="log-r"><div class="log-dur">${s.durMs?fmtDur(s.durMs):'\u2014'}</div><div class="log-pay">${s.pay?fmtMoney(s.pay):''}</div></div>`));
+      <div class="log-main"><div class="log-t1">${emp?emp.name:'Unknown'} \u00b7 ${s.label} <span class="log-badge lb-done">${s.kind}</span>${s.notes?' <i class="ti ti-note" style="color:var(--gold);font-size:13px;vertical-align:-2px" title="Has notes"></i>':''}</div>
+      <div class="log-t2">${d.label} \u00b7 ${new Date(s.start).toLocaleDateString()} ${fmtTime(s.start)}\u2013${s.end?fmtTime(s.end):'\u2026'}${s.notes?' \u00b7 \u201c'+esc(s.notes)+'\u201d':''}</div></div>
+      <div class="log-r"><div class="log-dur">${s.durMs?fmtDur(s.durMs):'\u2014'}</div><div class="log-pay">${s.pay?fmtMoney(s.pay):''}</div></div>`);
+    row.style.cursor='pointer';
+    row.onclick=()=>openSessionDetail(s, emp?emp.name:'Unknown');
+    body.appendChild(row);
   });
+}
+function esc(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function openSessionDetail(s, empName){
+  const d=DEPTS[s.dept]||{label:s.dept};
+  const isOwner = currentUser && currentUser.isAdmin;
+  $('#modalTitle').textContent=s.label;
+  $('#modalBody').innerHTML=`
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${empName?`<div class="sd-row"><span class="sd-l">Employee</span><span class="sd-v">${esc(empName)}</span></div>`:''}
+      <div class="sd-row"><span class="sd-l">Department</span><span class="sd-v">${d.label}</span></div>
+      <div class="sd-row"><span class="sd-l">Date</span><span class="sd-v">${new Date(s.start).toLocaleDateString()}</span></div>
+      <div class="sd-row"><span class="sd-l">Time</span><span class="sd-v">${fmtTime(s.start)} \u2013 ${s.end?fmtTime(s.end):'\u2026'}</span></div>
+      <div class="sd-row"><span class="sd-l">Duration</span><span class="sd-v">${s.durMs?fmtDur(s.durMs):'\u2014'}</span></div>
+      ${s.sub?`<div class="sd-row"><span class="sd-l">Address / detail</span><span class="sd-v">${esc(s.sub)}</span></div>`:''}
+      <div class="sd-row"><span class="sd-l">${isOwner?'Employee pay':'Your pay'}</span><span class="sd-v" style="color:var(--gold);font-weight:700">${fmtMoney(s.pay||0)}</span></div>
+      ${isOwner&&s.clientPrice?`<div class="sd-row"><span class="sd-l">Client price</span><span class="sd-v">${fmtMoney(s.clientPrice)}</span></div>`:''}
+    </div>
+    <div style="margin-top:16px">
+      <div style="font-size:10px;color:var(--txt3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px">Notes</div>
+      <div style="background:var(--bg3);border:0.5px solid var(--line2);border-radius:8px;padding:13px;font-size:13px;line-height:1.6;color:${s.notes?'var(--txt)':'var(--txt3)'};white-space:pre-wrap;word-break:break-word">${s.notes?esc(s.notes):'No notes were left for this job.'}</div>
+    </div>`;
+  $('#modalFoot').innerHTML=`<button class="btn btn-pri" id="sdClose">Close</button>`;
+  $('#modalBg').classList.add('show');
+  $('#sdClose').onclick=closeModal; $('#modalX').onclick=closeModal;
 }
 function renderAdminPayroll(){
   const pane=$('#adminPane');
@@ -1233,8 +1340,22 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape') pressKey('clear');
 });
 $('#btnLogout').onclick=logout;
+window.addEventListener('beforeunload', saveState);
 renderDemoPins();
 updatePinDisplay();
+
+// Restore a logged-in session after a refresh so nothing is lost.
+(async function bootRestore(){
+  if(loadState() && currentUser){
+    if(USE_SB){
+      try{
+        if(currentUser.dept==='airbnb'){ PROPERTIES = await DB.getProperties(); }
+        await refreshSessions();
+      }catch(e){}
+    }
+    await enterApp();
+  }
+})();
 </script>
 </body>
 </html>
