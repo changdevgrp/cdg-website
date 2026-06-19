@@ -360,9 +360,19 @@ const DB = {
     return EMPLOYEES.find(e=>e.pin===pin)||null;
   },
   async addEmployee(emp){
-    if(USE_SB){ const {data,error}=await sb.from('employees').insert({name:emp.name,dept:emp.dept,pin:emp.pin,rate:emp.rate}).select().single();
+    const row={name:emp.name,dept:emp.dept,pin:emp.pin,rate:emp.rate||0,pay_type:emp.payType||'hourly',
+      phone:emp.phone||null,email:emp.email||null,address:emp.address||null,
+      hire_date:emp.hireDate||null,emergency:emp.emergency||null,notes:emp.notes||null};
+    if(USE_SB){ const {data,error}=await sb.from('employees').insert(row).select().single();
       if(error){console.error(error);throw error;} return mapEmp(data); }
     const e={...emp,id:Math.max(0,...EMPLOYEES.map(x=>x.id))+1}; EMPLOYEES.push(e); return e;
+  },
+  async updateEmployee(id, emp){
+    const row={name:emp.name,dept:emp.dept,pin:emp.pin,rate:emp.rate||0,pay_type:emp.payType||'hourly',
+      phone:emp.phone||null,email:emp.email||null,address:emp.address||null,
+      hire_date:emp.hireDate||null,emergency:emp.emergency||null,notes:emp.notes||null};
+    if(USE_SB){ const {error}=await sb.from('employees').update(row).eq('id',id); if(error){console.error(error);throw error;} return; }
+    const i=EMPLOYEES.findIndex(e=>e.id===id); if(i>=0) EMPLOYEES[i]={...EMPLOYEES[i],...emp,id};
   },
   async removeEmployee(id){
     if(USE_SB){ const {error}=await sb.from('employees').update({active:false}).eq('id',id); if(error)console.error(error); return; }
@@ -388,7 +398,9 @@ const DB = {
     SESSIONS.unshift({...s});
   }
 };
-function mapEmp(r){ return {id:r.id,name:r.name,dept:r.dept,pin:r.pin,rate:Number(r.rate)||0}; }
+function mapEmp(r){ return {id:r.id,name:r.name,dept:r.dept,pin:r.pin,rate:Number(r.rate)||0,
+  payType:r.pay_type||'hourly',phone:r.phone||'',email:r.email||'',address:r.address||'',
+  hireDate:r.hire_date||'',emergency:r.emergency||'',notes:r.notes||''}; }
 function mapSess(r){ return {id:r.id,empId:r.emp_id,dept:r.dept,kind:r.kind,label:r.label,sub:r.sub,client:r.client,
   start:r.start_ts?new Date(r.start_ts).getTime():null,end:r.end_ts?new Date(r.end_ts).getTime():null,
   durMs:r.dur_ms?Number(r.dur_ms):null,pay:r.pay?Number(r.pay):null,status:r.status,
@@ -397,7 +409,7 @@ function mapSess(r){ return {id:r.id,empId:r.emp_id,dept:r.dept,kind:r.kind,labe
 // ---- Brand / dept config ----
 const DEPTS = {
   rivus:  { label:'Rivus Force',     type:'stops',   color:'#5DCAA5', tag:'dt-rivus',  icon:'ti-droplet' },
-  handy:  { label:'Handy-Force',     type:'stops',   color:'#8BA4FF', tag:'dt-handy',  icon:'ti-tools' },
+  handy:  { label:'Handy-Force / Rivus Force', type:'stops',   color:'#8BA4FF', tag:'dt-handy',  icon:'ti-tools' },
   airbnb: { label:'Cleaning Rangers \u2014 Airbnb', type:'airbnb', color:'#2ECC8A', tag:'dt-airbnb', icon:'ti-sparkles' },
   hotel:  { label:'Cleaning Rangers \u2014 Hotel',  type:'hotel',  color:'#C9A96E', tag:'dt-hotel',  icon:'ti-building' },
   admin:  { label:'Administrator',   type:'admin',   color:'#9B8FFF', tag:'dt-admin',  icon:'ti-shield' }
@@ -425,6 +437,8 @@ let PROPERTIES = [
 
 const JOB_TYPES = ['Pool cleaning','Spa maintenance','Chemical balance','Equipment repair','Filter service','Inspection','General maintenance','Other'];
 const HF_JOBS  = ['Repair','Installation','Maintenance','Custom build','Inspection','Emergency call','Punch list','Other'];
+// Ryan covers both Handy-Force and Rivus Force — combined, prefixed list so each stop is tagged by business.
+const FIELD_JOBS = ['Handy: Repair','Handy: Installation','Handy: Maintenance','Handy: Custom build','Handy: Inspection','Handy: Emergency call','Handy: Punch list','Rivus: Pool cleaning','Rivus: Spa maintenance','Rivus: Chemical balance','Rivus: Equipment repair','Rivus: Filter service','Other'];
 
 // ---- Session store (in-memory) ---- // [SUPABASE] all writes -> sessions table
 let SESSIONS = [];   // {id, empId, dept, kind, label, sub, start, end, durMs, pay, status, gps, notes}
@@ -569,7 +583,7 @@ function todayStats(){
 /* ============ STOPS TRACKER (Rivus / Handy) ============ */
 function renderStops(){
   const d=DEPTS[currentUser.dept];
-  const jobs = currentUser.dept==='rivus'?JOB_TYPES:HF_JOBS;
+  const jobs = currentUser.dept==='rivus'?JOB_TYPES:(currentUser.dept==='handy'?FIELD_JOBS:HF_JOBS);
   const st=todayStats();
   const m=$('#mainContent');
   m.innerHTML = greetBlock() + `
@@ -810,7 +824,7 @@ function renderHotel(){
     };
   }else{
     hb.innerHTML=`
-      <div class="field"><span class="field-l">Hotel / location</span><input class="field-i" id="hotelName" placeholder="e.g. Bayfront Marriott"/></div>
+      <div class="field"><span class="field-l">Hotel / location</span><input class="field-i" id="hotelName" value="Days Inn Saint Augustine" placeholder="e.g. Days Inn Saint Augustine"/></div>
       <div class="field-row">
         <div class="field"><span class="field-l">Shift type</span><select class="field-s" id="hotelShift"><option>Morning</option><option>Midday</option><option>Evening</option><option>Overnight</option></select></div>
         <div class="field"><span class="field-l">Floor / section</span><input class="field-i" id="hotelFloor" placeholder="e.g. Floors 3\u20135"/></div>
@@ -878,7 +892,7 @@ async function renderAdminTeam(){
       <div class="panel-h"><div class="panel-ht"><i class="ti ti-users"></i>Employees</div>
         <button class="btn btn-pri btn-sm" id="btnAddEmp"><i class="ti ti-plus"></i>Add Employee</button></div>
       <div class="panel-b" style="padding:0">
-        <table class="emp-table"><thead><tr><th>Name</th><th>Department</th><th>PIN</th><th>Rate</th><th></th></tr></thead>
+        <table class="emp-table"><thead><tr><th>Name</th><th>Department</th><th>PIN</th><th>Pay</th><th></th></tr></thead>
         <tbody id="empRows"></tbody></table>
       </div>
     </div>`;
@@ -886,42 +900,72 @@ async function renderAdminTeam(){
   if(USE_SB){ EMPLOYEES = await DB.getEmployees(); }
   EMPLOYEES.forEach(e=>{
     const d=DEPTS[e.dept];
+    const payLabel = e.payType==='flat' ? 'flat' : (e.payType==='salary' ? '$'+e.rate+'/yr' : (e.rate?('$'+e.rate+'/hr'):'\u2014'));
     const tr=el('tr',null,`
-      <td style="font-weight:500">${e.name}</td>
+      <td style="font-weight:500;cursor:pointer" class="empname">${e.name}${e.phone?'<div style="font-size:10px;color:var(--txt3);font-family:Space Mono,monospace;margin-top:2px">'+e.phone+'</div>':''}</td>
       <td><span class="dept-tag ${d.tag}">${d.label}</span></td>
       <td class="pin-cell">${e.pin}</td>
-      <td class="mono">${e.rate?('$'+e.rate+'/hr'):'flat'}</td>
-      <td style="text-align:right"><button class="btn btn-sm btn-danger" data-del="${e.id}"><i class="ti ti-trash"></i></button></td>`);
+      <td class="mono">${payLabel}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn btn-sm" data-edit="${e.id}" style="margin-right:6px"><i class="ti ti-edit"></i></button>
+        <button class="btn btn-sm btn-danger" data-del="${e.id}"><i class="ti ti-trash"></i></button></td>`);
     tb.appendChild(tr);
+    tr.querySelector('.empname').onclick=()=>openEmpForm(e);
   });
-  $('#btnAddEmp').onclick=openAddEmp;
+  $('#btnAddEmp').onclick=()=>openEmpForm(null);
+  document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEmpForm(EMPLOYEES.find(e=>e.id===+b.dataset.edit)));
   document.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
-    const id=+b.dataset.del;
-    if(confirm('Remove this employee?')){ await DB.removeEmployee(id); EMPLOYEES=EMPLOYEES.filter(e=>e.id!==id); renderAdminTeam(); renderDemoPins(); toast('Employee removed'); }
+    const id=+b.dataset.del; const emp=EMPLOYEES.find(e=>e.id===id);
+    if(confirm('Remove '+(emp?emp.name:'this employee')+'?')){ await DB.removeEmployee(id); EMPLOYEES=EMPLOYEES.filter(e=>e.id!==id); renderAdminTeam(); renderDemoPins(); toast('Employee removed'); }
   });
 }
-function openAddEmp(){
-  $('#modalTitle').textContent='Add Employee';
+// Shared Add/Edit profile form (emp=null -> add)
+function openEmpForm(emp){
+  const isEdit=!!emp;
+  emp=emp||{};
+  $('#modalTitle').textContent=isEdit?('Edit \u00b7 '+emp.name):'Add Employee';
+  const opt=(v,l)=>`<option value="${v}"${emp.dept===v?' selected':''}>${l}</option>`;
+  const popt=(v,l)=>`<option value="${v}"${(emp.payType||'hourly')===v?' selected':''}>${l}</option>`;
   $('#modalBody').innerHTML=`
-    <div class="field"><span class="field-l">Full name</span><input class="field-i" id="neName" placeholder="First Last"/></div>
-    <div class="field"><span class="field-l">Department</span><select class="field-s" id="neDept">
-      <option value="rivus">Rivus Force</option><option value="handy">Handy-Force</option>
-      <option value="airbnb">Cleaning Rangers \u2014 Airbnb</option><option value="hotel">Cleaning Rangers \u2014 Hotel</option>
-      <option value="admin">Administrator</option></select></div>
+    <div class="field"><span class="field-l">Full name <span style="color:var(--accent2)">*</span></span><input class="field-i" id="efName" value="${emp.name||''}" placeholder="First Last"/></div>
     <div class="field-row">
-      <div class="field"><span class="field-l">4-digit PIN</span><input class="field-i mono" id="nePin" maxlength="4" placeholder="0000"/></div>
-      <div class="field"><span class="field-l">Hourly rate ($)</span><input class="field-i mono" id="neRate" placeholder="0 = flat"/></div>
-    </div>`;
-  $('#modalFoot').innerHTML=`<button class="btn btn-ghost" id="meCancel">Cancel</button><button class="btn btn-pri" id="meSave">Add Employee</button>`;
+      <div class="field"><span class="field-l">Department</span><select class="field-s" id="efDept">
+        ${opt('airbnb','Cleaning Rangers \u2014 Airbnb')}${opt('hotel','Cleaning Rangers \u2014 Hotel')}${opt('handy','Handy-Force / Rivus Force')}${opt('rivus','Rivus Force')}${opt('admin','Administrator')}</select></div>
+      <div class="field"><span class="field-l">4-digit PIN <span style="color:var(--accent2)">*</span></span><input class="field-i mono" id="efPin" maxlength="4" value="${emp.pin||''}" placeholder="0000"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><span class="field-l">Pay type</span><select class="field-s" id="efPayType">${popt('hourly','Hourly')}${popt('flat','Flat / per-job')}${popt('salary','Salary')}</select></div>
+      <div class="field"><span class="field-l">Rate / amount ($)</span><input class="field-i mono" id="efRate" value="${emp.rate||''}" placeholder="0"/></div>
+    </div>
+    <div style="font-size:10px;color:var(--txt3);letter-spacing:0.08em;margin:16px 0 10px;text-transform:uppercase">Personal Info</div>
+    <div class="field-row">
+      <div class="field"><span class="field-l">Phone</span><input class="field-i" id="efPhone" value="${emp.phone||''}" placeholder="(904) 000-0000"/></div>
+      <div class="field"><span class="field-l">Email</span><input class="field-i" id="efEmail" value="${emp.email||''}" placeholder="name@email.com"/></div>
+    </div>
+    <div class="field"><span class="field-l">Address</span><input class="field-i" id="efAddress" value="${emp.address||''}" placeholder="Street, City, FL ZIP"/></div>
+    <div class="field-row">
+      <div class="field"><span class="field-l">Hire date</span><input class="field-i" id="efHire" type="date" value="${emp.hireDate||''}"/></div>
+      <div class="field"><span class="field-l">Emergency contact</span><input class="field-i" id="efEmerg" value="${emp.emergency||''}" placeholder="Name \u00b7 phone"/></div>
+    </div>
+    <div class="field"><span class="field-l">Notes</span><textarea class="field-t" id="efNotes" placeholder="Anything else...">${emp.notes||''}</textarea></div>`;
+  $('#modalFoot').innerHTML=`<button class="btn btn-ghost" id="efCancel">Cancel</button><button class="btn btn-pri" id="efSave">${isEdit?'Save Changes':'Add Employee'}</button>`;
   $('#modalBg').classList.add('show');
-  $('#meCancel').onclick=closeModal; $('#modalX').onclick=closeModal;
-  $('#meSave').onclick=async()=>{
-    const name=$('#neName').value.trim(), pin=$('#nePin').value.trim(), dept=$('#neDept').value, rate=+$('#neRate').value||0;
-    if(!name||pin.length!==4){ toast('Name + 4-digit PIN required','err'); return; }
-    if(EMPLOYEES.some(e=>e.pin===pin)||pin===ADMIN_PIN){ toast('PIN already in use','err'); return; }
-    try{ await DB.addEmployee({name,dept,pin,rate}); }
-    catch(e){ toast('Could not add (PIN may exist)','err'); return; }
-    closeModal(); renderAdminTeam(); renderDemoPins(); toast('Employee added \u00b7 '+name);
+  $('#efCancel').onclick=closeModal; $('#modalX').onclick=closeModal;
+  $('#efSave').onclick=async()=>{
+    const data={
+      name:$('#efName').value.trim(), dept:$('#efDept').value, pin:$('#efPin').value.trim(),
+      payType:$('#efPayType').value, rate:+$('#efRate').value||0,
+      phone:$('#efPhone').value.trim(), email:$('#efEmail').value.trim(), address:$('#efAddress').value.trim(),
+      hireDate:$('#efHire').value||null, emergency:$('#efEmerg').value.trim(), notes:$('#efNotes').value.trim()
+    };
+    if(!data.name||data.pin.length!==4){ toast('Name + 4-digit PIN required','err'); return; }
+    const clash=EMPLOYEES.some(e=>e.pin===data.pin && e.id!==emp.id)|| data.pin===ADMIN_PIN;
+    if(clash){ toast('PIN already in use','err'); return; }
+    try{
+      if(isEdit) await DB.updateEmployee(emp.id, data);
+      else await DB.addEmployee(data);
+    }catch(e){ toast('Could not save (PIN may exist)','err'); return; }
+    closeModal(); renderAdminTeam(); renderDemoPins(); toast(isEdit?('Updated \u00b7 '+data.name):('Added \u00b7 '+data.name));
   };
 }
 function renderAdminLogs(){
