@@ -16,7 +16,7 @@
 <meta name="twitter:title" content="Meet the Founders | Chang Development Group"/>
 <meta name="twitter:description" content="The people building a family of service companies that empower communities across Florida."/>
 <meta name="twitter:image" content="https://changdevgrp.com/og-image.png"/>
-<meta name="description" content="Meet the people behind Chang Development Group \u2014 the founders and leaders building a family of service companies that empower communities across Florida."/>
+<meta name="description" content="Meet the people behind Chang Development Group &mdash; the founders and leaders building a family of service companies that empower communities across Florida."/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet"/>
@@ -75,6 +75,7 @@ button{font-family:inherit;cursor:pointer}
 .spot{border-bottom:0.5px solid var(--line2)}
 .spot-wrap{max-width:1180px;margin:0 auto;padding:80px 48px;display:grid;grid-template-columns:0.9fr 1.1fr;gap:64px;align-items:center}
 .portrait{position:relative;aspect-ratio:4/5;border-radius:18px;overflow:hidden;border:0.5px solid var(--line2);background:linear-gradient(145deg,var(--bg3),var(--bg2));display:flex;align-items:center;justify-content:center}
+.portrait-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 20%}
 /* PLACEHOLDER avatar — replace .portrait innerHTML with <img src="founder-pablo.jpg"> */
 .portrait-ph{display:flex;flex-direction:column;align-items:center;gap:18px;color:var(--txt3)}
 .portrait-mono{width:130px;height:130px;border-radius:50%;background:linear-gradient(145deg,var(--accent3),var(--accent));display:flex;align-items:center;justify-content:center;font-size:48px;font-weight:700;color:#fff;letter-spacing:0.02em;box-shadow:0 20px 60px rgba(91,123,255,0.3)}
@@ -254,13 +255,9 @@ button{font-family:inherit;cursor:pointer}
 <!-- FOUNDER SPOTLIGHT: PABLO CHANG -->
 <section class="spot">
   <div class="spot-wrap">
-    <!-- PORTRAIT: replace the .portrait-ph block with <img src="pablo-chang.jpg" style="width:100%;height:100%;object-fit:cover"/> -->
     <div class="portrait">
       <div class="portrait-glow"></div>
-      <div class="portrait-ph">
-        <div class="portrait-mono">PC</div>
-        <div class="portrait-note">ADD PHOTO:<br>founder portrait here</div>
-      </div>
+      <img src="pablo-chang.jpg" alt="Pablo Chang, Founder &amp; Owner of Chang Development Group" class="portrait-img"/>
       <div class="portrait-badge">
         <div><div class="pb-l">FOUNDER &amp; OWNER</div><div class="pb-v">Chang Development Group</div></div>
         <i class="ti ti-building-skyscraper pb-ico"></i>
@@ -286,14 +283,6 @@ button{font-family:inherit;cursor:pointer}
   </div>
 </section>
 
-<!-- EDIT NOTE (for you — delete this block before publishing if you want it hidden) -->
-<div class="editnote">
-  <div class="editnote-inner">
-    <i class="ti ti-pencil"></i>
-    <div><strong>Editable:</strong> Swap the "PC" placeholder for your real photo (instructions are in the code comment right above the portrait), and tweak the bio &amp; quote to your voice. Send me your final bio + a headshot and I'll drop them in perfectly. You can delete this yellow note anytime.</div>
-  </div>
-</div>
-
 <!-- STORY -->
 <section class="story-sec">
   <div class="story-wrap">
@@ -313,26 +302,13 @@ button{font-family:inherit;cursor:pointer}
     <div class="team-head">
       <div class="eyebrow ctr" style="color:var(--accent);justify-content:center"><span class="bar"></span>LEADERSHIP &amp; TEAM<span class="bar"></span></div>
       <h2 class="team-h">The people who make it <em>run.</em></h2>
-      <p class="team-sub">Co-founders, partners, and key leaders across the CDG family. Send me their names, roles, and bios and I'll build out each card.</p>
+      <p class="team-sub">Co-founders, partners, and key leaders across the CDG family &mdash; the people who turn our standard into everyday execution.</p>
     </div>
     <div class="team-grid">
-      <!-- TEMPLATE CARD — duplicate and fill for each leader -->
-      <div class="tm">
-        <div class="tm-av" style="background:linear-gradient(145deg,var(--accent3),var(--accent))">?</div>
-        <div class="tm-name">Your Name Here</div>
-        <div class="tm-role">CO-FOUNDER / TITLE</div>
-        <div class="tm-bio">A short 1\u20132 sentence bio goes here \u2014 their role, what they lead, and what they bring to the CDG family.</div>
-      </div>
-      <div class="tm">
-        <div class="tm-av" style="background:linear-gradient(145deg,#1a7a52,var(--green))">?</div>
-        <div class="tm-name">Team Member</div>
-        <div class="tm-role">OPERATIONS / TITLE</div>
-        <div class="tm-bio">A short 1\u20132 sentence bio goes here \u2014 their role, what they lead, and what they bring to the CDG family.</div>
-      </div>
-      <div class="tm add">
-        <i class="ti ti-user-plus"></i>
-        <div class="a1">Add a leader</div>
-        <div class="a2">SEND ME THEIR DETAILS</div>
+      <div class="tm" style="grid-column:1/-1;text-align:center;padding:48px 32px">
+        <i class="ti ti-users-group" style="font-size:32px;color:var(--accent);margin-bottom:14px;display:block"></i>
+        <div class="tm-name">Our team is growing.</div>
+        <div class="tm-bio" style="max-width:560px;margin:10px auto 0">Every Agent of C.H.A.N.G.E. across our brands &mdash; from turnovers to repairs to pool care &mdash; carries the same standard. As CDG grows, the leaders who build it will be featured here.</div>
       </div>
     </div>
   </div>
